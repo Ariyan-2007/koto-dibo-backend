@@ -1,0 +1,6 @@
+@KotoDibo.Api_HostAddress = http://localhost:5047
+
+GET {{KotoDibo.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

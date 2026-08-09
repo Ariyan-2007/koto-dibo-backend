@@ -39,6 +39,10 @@ ScaffoldingReadMe.txt
 # dotenv environment variables file
 .env
 
+# Local secrets (real connection strings / JWT secrets go here, never committed)
+appsettings.Development.json
+appsettings.*.local.json
+
 # Others
 ~$*
 *~
