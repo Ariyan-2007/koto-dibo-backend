@@ -10,6 +10,7 @@ public static class MongoClassMapRegistrar
             new UserCredentialConfiguration(),
             new RefreshTokenConfiguration(),
             new HouseholdConfiguration(),
+            new HouseholdMembershipConfiguration(),
             new MealEntryConfiguration(),
             new BazarEntryConfiguration(),
             new MealRateConfiguration(),

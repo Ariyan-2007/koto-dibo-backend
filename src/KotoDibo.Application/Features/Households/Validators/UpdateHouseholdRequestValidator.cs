@@ -3,13 +3,14 @@ using KotoDibo.Application.Features.Households.DTOs;
 
 namespace KotoDibo.Application.Features.Households.Validators;
 
-public class CreateHouseholdRequestValidator : AbstractValidator<CreateHouseholdRequest>
+public class UpdateHouseholdRequestValidator : AbstractValidator<UpdateHouseholdRequest>
 {
-    public CreateHouseholdRequestValidator()
+    public UpdateHouseholdRequestValidator()
     {
         RuleFor(x => x.Name)
             .NotEmpty()
-            .MaximumLength(100);
+            .MaximumLength(100)
+            .When(x => x.Name is not null);
 
         RuleFor(x => x.Description)
             .MaximumLength(500);

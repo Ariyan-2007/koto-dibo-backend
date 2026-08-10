@@ -1,5 +1,6 @@
 using System.Reflection;
 using FluentValidation;
+using KotoDibo.Application.Common.Interfaces;
 using KotoDibo.Application.Features.Auth.Interfaces;
 using KotoDibo.Application.Features.Auth.Services;
 using KotoDibo.Application.Features.Bazar.Interfaces;
@@ -34,7 +35,9 @@ public static class DependencyInjection
         services.AddScoped<IMapper, ServiceMapper>();
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IHouseholdAccessService, HouseholdAccessService>();
         services.AddScoped<IHouseholdService, HouseholdService>();
+        services.AddScoped<IHouseholdMembershipService, HouseholdMembershipService>();
         services.AddScoped<IMealEntryService, MealEntryService>();
         services.AddScoped<IBazarEntryService, BazarEntryService>();
         services.AddScoped<IBillSplitService, BillSplitService>();

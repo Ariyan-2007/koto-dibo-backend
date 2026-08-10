@@ -9,6 +9,8 @@ public static class MongoIndexInitializer
             new UserIndexConfiguration(),
             new UserCredentialIndexConfiguration(),
             new RefreshTokenIndexConfiguration(),
+            new HouseholdIndexConfiguration(),
+            new HouseholdMembershipIndexConfiguration(),
         ];
 
         foreach (var configuration in configurations)
