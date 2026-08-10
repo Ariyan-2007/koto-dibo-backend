@@ -18,22 +18,42 @@ public static class HouseholdRolePolicy
             HouseholdPermission.ViewMembers, HouseholdPermission.AddMember,
             HouseholdPermission.RemoveMember, HouseholdPermission.UpdateMemberRole,
             HouseholdPermission.LeaveHousehold,
+            HouseholdPermission.AddBazarPurchase, HouseholdPermission.ViewBazar,
+            HouseholdPermission.UpdateBazarPurchase, HouseholdPermission.CancelBazarPurchase,
+            HouseholdPermission.AddContribution, HouseholdPermission.ViewContributions,
+            HouseholdPermission.UpdateContribution, HouseholdPermission.CancelContribution,
+            HouseholdPermission.RecordOwnMealCount, HouseholdPermission.RecordAnyMealCount,
+            HouseholdPermission.ViewMeals,
+            HouseholdPermission.ViewMealCalculation,
         ],
         [HouseholdRole.Manager] =
         [
             HouseholdPermission.ViewHousehold, HouseholdPermission.UpdateHousehold,
             HouseholdPermission.ViewMembers, HouseholdPermission.AddMember,
             HouseholdPermission.RemoveMember, HouseholdPermission.LeaveHousehold,
+            HouseholdPermission.AddBazarPurchase, HouseholdPermission.ViewBazar,
+            HouseholdPermission.UpdateBazarPurchase, HouseholdPermission.CancelBazarPurchase,
+            HouseholdPermission.AddContribution, HouseholdPermission.ViewContributions,
+            HouseholdPermission.UpdateContribution, HouseholdPermission.CancelContribution,
+            HouseholdPermission.RecordOwnMealCount, HouseholdPermission.RecordAnyMealCount,
+            HouseholdPermission.ViewMeals,
+            HouseholdPermission.ViewMealCalculation,
         ],
         [HouseholdRole.Member] =
         [
             HouseholdPermission.ViewHousehold, HouseholdPermission.ViewMembers,
             HouseholdPermission.LeaveHousehold,
+            HouseholdPermission.AddBazarPurchase, HouseholdPermission.ViewBazar,
+            HouseholdPermission.AddContribution, HouseholdPermission.ViewContributions,
+            HouseholdPermission.RecordOwnMealCount, HouseholdPermission.ViewMeals,
+            HouseholdPermission.ViewMealCalculation,
         ],
         [HouseholdRole.Viewer] =
         [
             HouseholdPermission.ViewHousehold, HouseholdPermission.ViewMembers,
             HouseholdPermission.LeaveHousehold,
+            HouseholdPermission.ViewBazar, HouseholdPermission.ViewContributions,
+            HouseholdPermission.ViewMeals, HouseholdPermission.ViewMealCalculation,
         ],
     };
 

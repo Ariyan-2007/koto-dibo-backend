@@ -11,4 +11,20 @@ public enum HouseholdPermission
     RemoveMember,
     UpdateMemberRole,
     LeaveHousehold,
+
+    AddBazarPurchase,
+    ViewBazar,
+    UpdateBazarPurchase,
+    CancelBazarPurchase,
+
+    AddContribution,
+    ViewContributions,
+    UpdateContribution,
+    CancelContribution,
+
+    RecordOwnMealCount,
+    RecordAnyMealCount,
+    ViewMeals,
+
+    ViewMealCalculation,
 }
