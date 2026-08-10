@@ -7,9 +7,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Gives this non-Web class library access to ASP.NET Core abstractions (IHttpContextAccessor,
+         HttpContext) from the shared framework, matching the runtime version instead of pulling in
+         the old standalone compat package. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.10" />
     <PackageReference Include="MongoDB.Driver" Version="3.10.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
   </ItemGroup>
 
   <PropertyGroup>

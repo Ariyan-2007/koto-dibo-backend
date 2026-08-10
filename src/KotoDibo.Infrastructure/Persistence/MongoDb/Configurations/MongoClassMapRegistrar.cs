@@ -7,6 +7,8 @@ public static class MongoClassMapRegistrar
         IMongoClassMapConfiguration[] configurations =
         [
             new UserConfiguration(),
+            new UserCredentialConfiguration(),
+            new RefreshTokenConfiguration(),
             new HouseholdConfiguration(),
             new MealEntryConfiguration(),
             new BazarEntryConfiguration(),
