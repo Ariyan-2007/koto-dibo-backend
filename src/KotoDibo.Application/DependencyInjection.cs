@@ -19,6 +19,8 @@ using KotoDibo.Application.Features.MealCalculation.Interfaces;
 using KotoDibo.Application.Features.MealCalculation.Services;
 using KotoDibo.Application.Features.Meals.Interfaces;
 using KotoDibo.Application.Features.Meals.Services;
+using KotoDibo.Application.Features.Settlement.Interfaces;
+using KotoDibo.Application.Features.Settlement.Services;
 using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +49,7 @@ public static class DependencyInjection
         services.AddScoped<IBazarPurchaseService, BazarPurchaseService>();
         services.AddScoped<IContributionService, ContributionService>();
         services.AddScoped<IBillSplitService, BillSplitService>();
+        services.AddScoped<ISettlementService, SettlementService>();
         services.AddScoped<IExpenseService, ExpenseService>();
         services.AddScoped<IBudgetService, BudgetService>();
 

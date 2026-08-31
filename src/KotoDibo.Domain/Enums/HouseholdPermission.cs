@@ -27,4 +27,12 @@ public enum HouseholdPermission
     ViewMeals,
 
     ViewMealCalculation,
+
+    AddBillSplit,
+    ViewBillSplit,
+    UpdateBillSplit,
+    CancelBillSplit,
+    ViewBillSplitSettlement,
+
+    ViewSettlement,
 }

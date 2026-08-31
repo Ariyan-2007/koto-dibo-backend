@@ -14,6 +14,8 @@ public static class MongoIndexInitializer
             new BazarPurchaseIndexConfiguration(),
             new ContributionIndexConfiguration(),
             new DailyMealEntryIndexConfiguration(),
+            new BillSplitIndexConfiguration(),
+            new UtilityTariffConfigIndexConfiguration(),
         ];
 
         foreach (var configuration in configurations)

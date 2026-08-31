@@ -2,6 +2,8 @@
 
 > This document extends `BLUEPRINT.md` (a snapshot of what's built) into a phased delivery plan. `BLUEPRINT.md` stays as-is — a point-in-time system description. This file answers "what ships next, in what order, to reach a usable MVP," anchored on the two features that make the product useful on day one: **meal cost accounting** and **fair bill splitting**.
 
+> **Status (2026-08-31):** Phases 2–4 are implemented backend-side — `FairSplitAllocator`, the full `BillSplit` CRUD + settlement API, and the unified `SettlementService` all ship with unit test coverage (see §3–§5 for what landed). Phases 1 and 5 (UI) and Phase 6 (lower-priority backend gaps) remain open — the companion `MVP_FRONTEND_BLUEPRINT.md` now covers the client-side plan in detail.
+
 ## 0. Why these two systems anchor the MVP
 
 A bachelor household's shared-money pain has two distinct shapes, and they should not be forced into one model:
@@ -47,7 +49,9 @@ The meal engine is solid but currently only reachable via raw API calls. MVP-rea
 
 **Acceptance:** a household can run the exact August-2026 dataset from this conversation through the real UI and get the same meal rate and balances back.
 
-## 3. Phase 2 — Fair-split domain model (port `TariffEngine` logic into `KotoDibo.Domain`)
+## 3. Phase 2 — Fair-split domain model (port `TariffEngine` logic into `KotoDibo.Domain`) — ✅ Done
+
+Implemented as specified: `FairSplitAllocator` (`KotoDibo.Domain/Calculations`), `UtilityTariffConfig`/`TariffBand` entities, `BillSplitMethod` enum (`TariffMetered`/`EqualSplit`/`WeightedSplit`), and an extended `BillSplit` entity carrying period, method, tariff reference, sub-meter/weight inputs and lifecycle status. A startup-idempotent `TariffConfigSeeder` seeds one illustrative Bangladesh electricity tariff schedule (clearly marked as reference rates — swap for real published BPDB/DPDC slabs before relying on it for real bills). `FairSplitAllocatorTests` (9 tests) verify the band-walk, expensive-bands-first attribution, and largest-remainder rounding against a hand-worked example.
 
 This is the core new work. `FairSplit`'s `TariffEngine.ts` is a pure, dependency-free calculation module — same shape as `MealCostAllocator` — which is exactly why it ports cleanly into `KotoDibo.Domain` as a new calculator, no architecture change needed.
 
@@ -71,7 +75,9 @@ This keeps the tariff engine as the flagship case (it's the hard one) while maki
 
 **Acceptance:** unit tests (`FairSplitAllocatorTests`, alongside `MealCostAllocatorTests`) reproducing the reference repo's band-walking and proportional-allocation behavior against the same Bangladesh tariff fixture, plus a largest-remainder rounding test proving allocations sum exactly to the total bill.
 
-## 4. Phase 3 — Application + API wiring (mirror the meal feature's shape exactly)
+## 4. Phase 3 — Application + API wiring (mirror the meal feature's shape exactly) — ✅ Done
+
+`BillSplitService`/`BillSplitController` are fully wired, mirroring Bazar/Contribution's ownership-check pattern and Meal's on-demand settlement pattern exactly: `POST/GET/PATCH /api/households/{id}/bill-splits`, `POST .../{id}/cancel`, `GET .../{id}/settlement`. Five new `HouseholdPermission`s (`AddBillSplit`, `ViewBillSplit`, `UpdateBillSplit`, `CancelBillSplit`, `ViewBillSplitSettlement`) are wired into `HouseholdRolePolicy` per role. 12 service-level unit tests cover validation, permission/ownership checks, and settlement correctness (cross-checked against the same worked example as the domain tests).
 
 Follow the established `Application/Features/<Name>/` pattern from `BLUEPRINT.md` §5 — `BillSplitService` already exists per the status table, so this phase is about finishing and wiring it, not building from scratch:
 
@@ -86,7 +92,9 @@ Follow the established `Application/Features/<Name>/` pattern from `BLUEPRINT.md
 
 **Acceptance:** a household can log an electricity bill period with sub-meter readings and get back a correct per-member settlement via the API, with the same permission and validation rigor as the meal endpoints.
 
-## 5. Phase 4 — Unified settlement view
+## 5. Phase 4 — Unified settlement view — ✅ Done
+
+Implemented as a thin, additive `SettlementService`/`SettlementController` (`GET /api/households/{id}/settlement?from=&to=`) that composes `MealCalculationService` + `BillSplitService` output into one net-balance-per-member number, per the plan below — it doesn't touch either allocator's internals. 4 unit tests cover the aggregation.
 
 Once both ledgers produce "who owes/is owed" balances independently, add a thin aggregation layer rather than making members reconcile two screens mentally:
 
@@ -96,6 +104,8 @@ Once both ledgers produce "who owes/is owed" balances independently, add a thin 
 This is additive and low-risk: it doesn't touch either allocator's internals, it just sums their outputs.
 
 ## 6. Phase 5 — Frontend / PWA
+
+> See `MVP_FRONTEND_BLUEPRINT.md` for the detailed module-by-module, API-by-API breakdown of this phase. Every backend endpoint it lists (auth, households, bazar, contributions, meals, bill-splits, settlement) is live as of the Phase 2–4 backend work above, so frontend work can start immediately without waiting on further backend changes.
 
 `BLUEPRINT.md` documents backend only — there's no client yet. Reference repo (`FairSplit`) is a good pattern source for the calculator-style UI specifically, not a template to clone wholesale:
 
@@ -121,10 +131,13 @@ Carried over from `BLUEPRINT.md` §12, sequenced after the two anchor features:
 ```
 Phase 1 (meal UI)  ─┐
                      ├─→ Phase 5 (frontend shell shared by both) ─→ Phase 4 (unified settlement)
-Phase 2 (fair-split  │
-  domain) → Phase 3  ┘
+Phase 2 (fair-split  │        [see MVP_FRONTEND_BLUEPRINT.md]
+  domain) → Phase 3  ┘        [both now ✅ Done backend-side]
   (fair-split API)
+  [both now ✅ Done]
                                                                     Phase 6 (backend gaps) — ongoing, lowest priority
 ```
 
 Phases 2→3 (fair-split) and Phase 1 (meal UI) can run in parallel — they don't share code yet. Phase 5 needs *something* from both to build against, so it trails. Phase 4 is deliberately last: it's a thin layer that only makes sense once both underlying settlements are real and tested.
+
+Backend-side, Phases 2, 3 and 4 are now done — everything Phase 5 (frontend) needs to build against is live. Phase 1's remaining scope is UI-only (the meal engine itself was already done pre-MVP). Phase 6 stays lowest priority, unchanged.

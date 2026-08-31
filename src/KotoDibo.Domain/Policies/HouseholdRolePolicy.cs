@@ -25,6 +25,10 @@ public static class HouseholdRolePolicy
             HouseholdPermission.RecordOwnMealCount, HouseholdPermission.RecordAnyMealCount,
             HouseholdPermission.ViewMeals,
             HouseholdPermission.ViewMealCalculation,
+            HouseholdPermission.AddBillSplit, HouseholdPermission.ViewBillSplit,
+            HouseholdPermission.UpdateBillSplit, HouseholdPermission.CancelBillSplit,
+            HouseholdPermission.ViewBillSplitSettlement,
+            HouseholdPermission.ViewSettlement,
         ],
         [HouseholdRole.Manager] =
         [
@@ -38,6 +42,10 @@ public static class HouseholdRolePolicy
             HouseholdPermission.RecordOwnMealCount, HouseholdPermission.RecordAnyMealCount,
             HouseholdPermission.ViewMeals,
             HouseholdPermission.ViewMealCalculation,
+            HouseholdPermission.AddBillSplit, HouseholdPermission.ViewBillSplit,
+            HouseholdPermission.UpdateBillSplit, HouseholdPermission.CancelBillSplit,
+            HouseholdPermission.ViewBillSplitSettlement,
+            HouseholdPermission.ViewSettlement,
         ],
         [HouseholdRole.Member] =
         [
@@ -47,6 +55,9 @@ public static class HouseholdRolePolicy
             HouseholdPermission.AddContribution, HouseholdPermission.ViewContributions,
             HouseholdPermission.RecordOwnMealCount, HouseholdPermission.ViewMeals,
             HouseholdPermission.ViewMealCalculation,
+            HouseholdPermission.AddBillSplit, HouseholdPermission.ViewBillSplit,
+            HouseholdPermission.ViewBillSplitSettlement,
+            HouseholdPermission.ViewSettlement,
         ],
         [HouseholdRole.Viewer] =
         [
@@ -54,6 +65,8 @@ public static class HouseholdRolePolicy
             HouseholdPermission.LeaveHousehold,
             HouseholdPermission.ViewBazar, HouseholdPermission.ViewContributions,
             HouseholdPermission.ViewMeals, HouseholdPermission.ViewMealCalculation,
+            HouseholdPermission.ViewBillSplit, HouseholdPermission.ViewBillSplitSettlement,
+            HouseholdPermission.ViewSettlement,
         ],
     };
 

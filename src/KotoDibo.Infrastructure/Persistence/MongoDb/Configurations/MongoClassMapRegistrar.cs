@@ -15,6 +15,7 @@ public static class MongoClassMapRegistrar
             new ContributionConfiguration(),
             new DailyMealEntryConfiguration(),
             new BillSplitConfiguration(),
+            new UtilityTariffConfigConfiguration(),
             new ExpenseConfiguration(),
             new BudgetConfiguration()
         ];
