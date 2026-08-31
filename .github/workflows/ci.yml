@@ -64,15 +64,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Opens (or reuses) a development -> main PR and merges it immediately. Deliberately does NOT
-  # wait for the PR's own status checks: build-and-test + docker-build-check already verified this
-  # exact commit above, and a PR opened via GITHUB_TOKEN won't trigger this workflow's
-  # pull_request trigger anyway (GitHub suppresses workflow runs triggered by GITHUB_TOKEN, to
-  # prevent infinite loops) — so a check-gated merge would hang forever waiting for a run that
-  # never happens. If `main` has required-review branch protection, this merge step will fail
-  # until that's relaxed or the token used here has bypass rights.
+  # Promotes development straight onto main — no PR. GITHUB_TOKEN can't create PRs (GitHub blocks
+  # Actions-authored PRs by default), and main only ever receives commits from this job, so main
+  # has no independent history worth preserving; it's just a mirror of development once CI is green.
   promote-to-main:
-    name: Open & merge PR into main
+    name: Push development to main
     needs: docker-build-check
     if: |
       needs.docker-build-check.result == 'success' &&
@@ -81,24 +77,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: development
+          fetch-depth: 0
 
-      - name: Create or reuse PR, then merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          PR_URL=$(gh pr list --base main --head development --state open --json url --jq '.[0].url')
-
-          if [ -z "$PR_URL" ]; then
-            PR_URL=$(gh pr create \
-              --base main \
-              --head development \
-              --title "Promote development to main" \
-              --body "Automated promotion — build-and-test and docker-build-check passed on \`development\` at ${{ github.sha }}.")
-          fi
-
-          gh pr merge "$PR_URL" --merge --delete-branch=false
+      - name: Push development to main
+        run: git push origin HEAD:main --force
