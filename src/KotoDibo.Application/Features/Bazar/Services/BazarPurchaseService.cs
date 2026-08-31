@@ -150,7 +150,7 @@ public class BazarPurchaseService : IBazarPurchaseService
 
     private void RequireNotFuture(DateOnly date, string field)
     {
-        var today = DateOnly.FromDateTime(_dateTimeProvider.UtcNow);
+        var today = Common.LocalDate.TodayFor(_dateTimeProvider.UtcNow);
         if (date > today)
         {
             throw new KotoDibo.Application.Common.Exceptions.ValidationException(new Dictionary<string, string[]>

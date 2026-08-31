@@ -116,6 +116,32 @@ public class DailyMealEntryServiceTests
     }
 
     [Fact]
+    public async Task SetCountAsync_CountZero_ExplicitlyExcludesButSucceeds()
+    {
+        GivenMemberships(Membership(HouseholdRole.Member, "member-1"));
+        GivenNoExistingEntry();
+
+        var result = await _sut.SetCountAsync("household-1", "member-1", "member-1", Today, new SetMealCountRequest { Count = 0m });
+
+        result.Count.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task SetCountAsync_DateIsTomorrowInUtcButTodayInBangladeshLocalTime_Succeeds()
+    {
+        // 19:00 UTC is already past local midnight in Bangladesh (UTC+6) — the household's local
+        // "today" is one calendar day ahead of the raw UTC date at this moment.
+        _dateTimeProvider.Setup(x => x.UtcNow).Returns(new DateTime(2026, 8, 31, 19, 0, 0, DateTimeKind.Utc));
+        var localToday = new DateOnly(2026, 9, 1);
+        GivenMemberships(Membership(HouseholdRole.Member, "member-1"));
+        GivenNoExistingEntry();
+
+        var result = await _sut.SetCountAsync("household-1", "member-1", "member-1", localToday, new SetMealCountRequest { Count = 2m });
+
+        result.Date.Should().Be(localToday);
+    }
+
+    [Fact]
     public async Task SetCountAsync_FutureDate_ThrowsValidationException()
     {
         GivenMemberships(Membership(HouseholdRole.Member, "member-1"));

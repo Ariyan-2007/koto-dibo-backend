@@ -107,6 +107,24 @@ public class BazarPurchaseServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_DateIsTomorrowInUtcButTodayInBangladeshLocalTime_Succeeds()
+    {
+        // 19:00 UTC is already past local midnight in Bangladesh (UTC+6) — the household's local
+        // "today" is one calendar day ahead of the raw UTC date at this moment.
+        _dateTimeProvider.Setup(x => x.UtcNow).Returns(new DateTime(2026, 8, 31, 19, 0, 0, DateTimeKind.Utc));
+        GivenMembership(Membership(HouseholdRole.Member, "member-1"));
+
+        var result = await _sut.CreateAsync("household-1", "member-1", new CreateBazarPurchaseRequest
+        {
+            Date = new DateOnly(2026, 9, 1),
+            Amount = 100m,
+            Currency = "BDT",
+        });
+
+        result.Date.Should().Be(new DateOnly(2026, 9, 1));
+    }
+
+    [Fact]
     public async Task CreateAsync_FutureDate_ThrowsValidationException()
     {
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));

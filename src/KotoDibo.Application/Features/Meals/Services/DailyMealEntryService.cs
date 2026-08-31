@@ -145,7 +145,7 @@ public class DailyMealEntryService : IDailyMealEntryService
 
     private void RequireNotFuture(DateOnly date)
     {
-        var today = DateOnly.FromDateTime(_dateTimeProvider.UtcNow);
+        var today = Common.LocalDate.TodayFor(_dateTimeProvider.UtcNow);
         if (date > today)
         {
             throw new KotoDibo.Application.Common.Exceptions.ValidationException(new Dictionary<string, string[]>
