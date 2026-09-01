@@ -23,7 +23,14 @@ public class BazarController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<BazarPurchaseDto>> Create(string householdId, CreateBazarPurchaseRequest request, CancellationToken cancellationToken)
     {
-        var purchase = await _bazarPurchaseService.CreateAsync(householdId, UserId, request, cancellationToken);
+        var purchase = await _bazarPurchaseService.CreateAsync(householdId, UserId, UserId, request, cancellationToken);
+        return CreatedAtAction(nameof(GetById), new { householdId, purchaseId = purchase.Id }, purchase);
+    }
+
+    [HttpPost("{userId}")]
+    public async Task<ActionResult<BazarPurchaseDto>> CreateFor(string householdId, string userId, CreateBazarPurchaseRequest request, CancellationToken cancellationToken)
+    {
+        var purchase = await _bazarPurchaseService.CreateAsync(householdId, UserId, userId, request, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { householdId, purchaseId = purchase.Id }, purchase);
     }
 

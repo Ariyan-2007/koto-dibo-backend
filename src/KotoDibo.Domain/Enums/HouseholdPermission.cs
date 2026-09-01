@@ -13,6 +13,7 @@ public enum HouseholdPermission
     LeaveHousehold,
 
     AddBazarPurchase,
+    AddAnyBazarPurchase,
     ViewBazar,
     UpdateBazarPurchase,
     CancelBazarPurchase,

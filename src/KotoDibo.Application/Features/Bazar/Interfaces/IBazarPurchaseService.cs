@@ -4,7 +4,7 @@ namespace KotoDibo.Application.Features.Bazar.Interfaces;
 
 public interface IBazarPurchaseService
 {
-    Task<BazarPurchaseDto> CreateAsync(string householdId, string callerUserId, CreateBazarPurchaseRequest request, CancellationToken cancellationToken = default);
+    Task<BazarPurchaseDto> CreateAsync(string householdId, string callerUserId, string targetUserId, CreateBazarPurchaseRequest request, CancellationToken cancellationToken = default);
 
     Task<BazarPurchaseDto> GetByIdAsync(string householdId, string callerUserId, string purchaseId, CancellationToken cancellationToken = default);
 

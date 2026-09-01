@@ -77,7 +77,7 @@ public class BazarPurchaseServiceTests
     {
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));
 
-        var result = await _sut.CreateAsync("household-1", "member-1", new CreateBazarPurchaseRequest
+        var result = await _sut.CreateAsync("household-1", "member-1", "member-1", new CreateBazarPurchaseRequest
         {
             Date = Today,
             Amount = 560m,
@@ -98,7 +98,7 @@ public class BazarPurchaseServiceTests
         // records unspent shopping cash carried into next month, deflating this month's FoodCost.
         GivenMembership(Membership(HouseholdRole.Member, "ariyan"));
 
-        var result = await _sut.CreateAsync("household-1", "ariyan", new CreateBazarPurchaseRequest
+        var result = await _sut.CreateAsync("household-1", "ariyan", "ariyan", new CreateBazarPurchaseRequest
         {
             Date = Today,
             Amount = -700m,
@@ -114,7 +114,7 @@ public class BazarPurchaseServiceTests
     {
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));
 
-        var act = () => _sut.CreateAsync("household-1", "member-1", new CreateBazarPurchaseRequest
+        var act = () => _sut.CreateAsync("household-1", "member-1", "member-1", new CreateBazarPurchaseRequest
         {
             Date = Today,
             Amount = 0m,
@@ -132,7 +132,7 @@ public class BazarPurchaseServiceTests
         _dateTimeProvider.Setup(x => x.UtcNow).Returns(new DateTime(2026, 8, 31, 19, 0, 0, DateTimeKind.Utc));
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));
 
-        var result = await _sut.CreateAsync("household-1", "member-1", new CreateBazarPurchaseRequest
+        var result = await _sut.CreateAsync("household-1", "member-1", "member-1", new CreateBazarPurchaseRequest
         {
             Date = new DateOnly(2026, 9, 1),
             Amount = 100m,
@@ -147,7 +147,7 @@ public class BazarPurchaseServiceTests
     {
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));
 
-        var act = () => _sut.CreateAsync("household-1", "member-1", new CreateBazarPurchaseRequest
+        var act = () => _sut.CreateAsync("household-1", "member-1", "member-1", new CreateBazarPurchaseRequest
         {
             Date = Today.AddDays(1),
             Amount = 100m,
@@ -162,7 +162,38 @@ public class BazarPurchaseServiceTests
     {
         GivenMembership(Membership(HouseholdRole.Viewer, "viewer-1"));
 
-        var act = () => _sut.CreateAsync("household-1", "viewer-1", new CreateBazarPurchaseRequest
+        var act = () => _sut.CreateAsync("household-1", "viewer-1", "viewer-1", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = 100m,
+            Currency = "BDT",
+        });
+
+        await act.Should().ThrowAsync<ForbiddenException>();
+    }
+
+    [Fact]
+    public async Task CreateAsync_ByManagerForOtherMember_Succeeds()
+    {
+        GivenMembership(Membership(HouseholdRole.Manager, "manager-1"));
+
+        var result = await _sut.CreateAsync("household-1", "manager-1", "member-2", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = 300m,
+            Currency = "BDT",
+            Note = "Manager on behalf",
+        });
+
+        result.PurchasedByUserId.Should().Be("member-2");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ByMemberForOtherMember_ThrowsForbidden()
+    {
+        GivenMembership(Membership(HouseholdRole.Member, "member-1"));
+
+        var act = () => _sut.CreateAsync("household-1", "member-1", "member-2", new CreateBazarPurchaseRequest
         {
             Date = Today,
             Amount = 100m,

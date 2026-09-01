@@ -32,17 +32,22 @@ public class BazarPurchaseService : IBazarPurchaseService
         _updateValidator = updateValidator;
     }
 
-    public async Task<BazarPurchaseDto> CreateAsync(string householdId, string callerUserId, CreateBazarPurchaseRequest request, CancellationToken cancellationToken = default)
+    public async Task<BazarPurchaseDto> CreateAsync(string householdId, string callerUserId, string targetUserId, CreateBazarPurchaseRequest request, CancellationToken cancellationToken = default)
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
-        await _access.RequireMembershipAsync(householdId, callerUserId, HouseholdPermission.AddBazarPurchase, cancellationToken);
+
+        var membership = await _access.RequireMembershipAsync(householdId, callerUserId, HouseholdPermission.AddBazarPurchase, cancellationToken);
+        RequireTargetAccess(membership.Role, callerUserId, targetUserId);
         RequireNotFuture(request.Date, nameof(request.Date));
+
+        // Confirms the target is an active member of this household (everyone has ViewHousehold).
+        await _access.RequireMembershipAsync(householdId, targetUserId, HouseholdPermission.ViewHousehold, cancellationToken);
 
         var now = _dateTimeProvider.UtcNow;
         var purchase = new BazarPurchase
         {
             HouseholdId = householdId,
-            PurchasedByUserId = callerUserId,
+            PurchasedByUserId = targetUserId,
             Date = request.Date,
             Amount = request.Amount,
             Currency = request.Currency.Trim().ToUpperInvariant(),
@@ -157,6 +162,19 @@ public class BazarPurchaseService : IBazarPurchaseService
             {
                 [field] = ["Date cannot be in the future."],
             });
+        }
+    }
+
+    private static void RequireTargetAccess(HouseholdRole callerRole, string callerUserId, string targetUserId)
+    {
+        if (targetUserId == callerUserId)
+        {
+            return;
+        }
+
+        if (!HouseholdRolePolicy.HasPermission(callerRole, HouseholdPermission.AddAnyBazarPurchase))
+        {
+            throw new ForbiddenException("You do not have permission to add bazar purchases for other members.");
         }
     }
 
