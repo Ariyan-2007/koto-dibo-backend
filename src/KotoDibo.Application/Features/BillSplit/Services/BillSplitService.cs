@@ -73,6 +73,9 @@ public class BillSplitService : IBillSplitService
             MemberInputs = request.MemberInputs
                 .Select(i => new KotoDibo.Domain.Entities.BillSplitMemberInput { UserId = i.UserId, Value = i.Value })
                 .ToList(),
+            FixedCharges = method == BillSplitMethod.TariffMetered
+                ? request.FixedCharges.Select(c => new KotoDibo.Domain.Entities.BillSplitFixedCharge { Label = c.Label.Trim(), Amount = c.Amount }).ToList()
+                : [],
             Notes = request.Notes?.Trim(),
             Status = FinancialEntryStatus.Active,
             CreatedAt = now,
@@ -158,6 +161,13 @@ public class BillSplitService : IBillSplitService
             entity.MemberInputs = resolvedMemberInputs
                 .Select(i => new KotoDibo.Domain.Entities.BillSplitMemberInput { UserId = i.UserId, Value = i.Value })
                 .ToList();
+
+            if (request.FixedCharges is not null)
+            {
+                entity.FixedCharges = request.FixedCharges
+                    .Select(c => new KotoDibo.Domain.Entities.BillSplitFixedCharge { Label = c.Label.Trim(), Amount = c.Amount })
+                    .ToList();
+            }
         }
         else
         {
@@ -218,6 +228,7 @@ public class BillSplitService : IBillSplitService
             TotalAmount = result.TotalAmount,
             AttributedCost = result.AttributedCost,
             SharedCost = result.SharedCost,
+            FixedChargesTotal = result.FixedChargesTotal,
             Bands = result.Bands.Select(b => new BillSplitBandDto
             {
                 FromUnits = b.FromUnits,
@@ -234,6 +245,7 @@ public class BillSplitService : IBillSplitService
                 Usage = m.Usage,
                 AttributedCost = m.AttributedCost,
                 SharedCost = m.SharedCost,
+                FixedChargeShare = m.FixedChargeShare,
                 TotalOwed = m.TotalOwed,
             }).ToList(),
         };
@@ -243,7 +255,7 @@ public class BillSplitService : IBillSplitService
     {
         var tariff = await FindTariffConfigAsync(entity.TariffCountry!, entity.TariffProvider, cancellationToken);
         var memberUsage = entity.MemberInputs.ToDictionary(i => i.UserId, i => i.Value);
-        return FairSplitAllocator.ComputeTariffMetered(tariff.Bands, entity.MainMeterUsage ?? 0m, memberUsage, activeMemberIds);
+        return FairSplitAllocator.ComputeTariffMetered(tariff.Bands, entity.MainMeterUsage ?? 0m, memberUsage, activeMemberIds, entity.FixedCharges);
     }
 
     private async Task<KotoDibo.Domain.Entities.UtilityTariffConfig> FindTariffConfigAsync(string country, string? provider, CancellationToken cancellationToken)
@@ -318,6 +330,7 @@ public class BillSplitService : IBillSplitService
         MainMeterUsage = entity.MainMeterUsage,
         TotalAmount = entity.TotalAmount,
         MemberInputs = entity.MemberInputs.Select(i => new BillSplitMemberInputDto { UserId = i.UserId, Value = i.Value }).ToList(),
+        FixedCharges = entity.FixedCharges.Select(c => new BillSplitFixedChargeDto { Label = c.Label, Amount = c.Amount }).ToList(),
         Notes = entity.Notes,
         Status = entity.Status.ToString(),
         CreatedAt = entity.CreatedAt,

@@ -19,6 +19,7 @@ public record FairSplitMemberResult
     public decimal? Usage { get; init; }
     public decimal AttributedCost { get; init; }
     public decimal SharedCost { get; init; }
+    public decimal FixedChargeShare { get; init; }
     public decimal TotalOwed { get; init; }
 }
 
@@ -27,6 +28,7 @@ public record FairSplitResult
     public decimal TotalAmount { get; init; }
     public decimal AttributedCost { get; init; }
     public decimal SharedCost { get; init; }
+    public decimal FixedChargesTotal { get; init; }
     public IReadOnlyList<TariffBandBreakdown> Bands { get; init; } = [];
     public IReadOnlyList<FairSplitMemberResult> Members { get; init; } = [];
 }
@@ -51,7 +53,8 @@ public static class FairSplitAllocator
         IReadOnlyList<TariffBand> bands,
         decimal totalUsage,
         IReadOnlyDictionary<string, decimal> memberUsage,
-        IReadOnlyCollection<string> activeMemberIds)
+        IReadOnlyCollection<string> activeMemberIds,
+        IReadOnlyList<BillSplitFixedCharge> fixedCharges)
     {
         if (bands.Count == 0)
         {
@@ -130,26 +133,38 @@ public static class FairSplitAllocator
             ? MealCostAllocator.Allocate(sharedCost, activeMemberIds.ToDictionary(id => id, _ => 1m))
             : new Dictionary<string, decimal>();
 
+        // Fixed charges (demand charge, VAT, meter rent, ...) are billed per connection, not per
+        // kWh — split equally across active members, same mechanism as the shared/common-area kWh
+        // cost above, but kept as a separate bucket so the settlement stays itemized (a member can
+        // see "your metered usage" vs. "your share of the flat fees" as distinct line items).
+        var fixedChargesTotal = fixedCharges.Sum(fc => fc.Amount);
+        var fixedChargeShareByUser = activeMemberIds.Count > 0
+            ? MealCostAllocator.Allocate(fixedChargesTotal, activeMemberIds.ToDictionary(id => id, _ => 1m))
+            : new Dictionary<string, decimal>();
+
         var userIds = memberUsage.Keys.Union(activeMemberIds).OrderBy(id => id, StringComparer.Ordinal).ToList();
         var members = userIds.Select(userId =>
         {
             var attributedShare = attributedShareByUser.GetValueOrDefault(userId, 0m);
             var sharedShare = sharedShareByUser.GetValueOrDefault(userId, 0m);
+            var fixedChargeShare = fixedChargeShareByUser.GetValueOrDefault(userId, 0m);
             return new FairSplitMemberResult
             {
                 UserId = userId,
                 Usage = memberUsage.GetValueOrDefault(userId, 0m),
                 AttributedCost = attributedShare,
                 SharedCost = sharedShare,
-                TotalOwed = attributedShare + sharedShare,
+                FixedChargeShare = fixedChargeShare,
+                TotalOwed = attributedShare + sharedShare + fixedChargeShare,
             };
         }).ToList();
 
         return new FairSplitResult
         {
-            TotalAmount = attributedCost + sharedCost,
+            TotalAmount = attributedCost + sharedCost + fixedChargesTotal,
             AttributedCost = attributedCost,
             SharedCost = sharedCost,
+            FixedChargesTotal = fixedChargesTotal,
             Bands = bandBreakdowns,
             Members = members,
         };

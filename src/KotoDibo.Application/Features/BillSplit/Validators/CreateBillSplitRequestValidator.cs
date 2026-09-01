@@ -45,6 +45,12 @@ public class CreateBillSplitRequestValidator : AbstractValidator<CreateBillSplit
                 .WithMessage("Sum of member sub-meter usage cannot exceed MainMeterUsage.")
                 .WithName(nameof(CreateBillSplitRequest.MemberInputs))
                 .When(x => x.MainMeterUsage is not null && x.MemberInputs.Count > 0);
+
+            RuleForEach(x => x.FixedCharges).ChildRules(charge =>
+            {
+                charge.RuleFor(c => c.Label).NotEmpty().MaximumLength(100);
+                charge.RuleFor(c => c.Amount).GreaterThan(0m).WithMessage("Fixed charge amount must be greater than zero.");
+            });
         });
 
         When(x => IsMethod(x.SplitMethod, BillSplitMethod.EqualSplit) || IsMethod(x.SplitMethod, BillSplitMethod.WeightedSplit), () =>

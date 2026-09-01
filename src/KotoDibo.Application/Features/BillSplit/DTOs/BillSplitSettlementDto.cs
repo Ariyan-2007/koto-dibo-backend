@@ -17,6 +17,7 @@ public record BillSplitMemberSettlementDto
     public decimal? Usage { get; init; }
     public decimal AttributedCost { get; init; }
     public decimal SharedCost { get; init; }
+    public decimal FixedChargeShare { get; init; }
     public decimal TotalOwed { get; init; }
 }
 
@@ -26,6 +27,7 @@ public record BillSplitSettlementDto
     public decimal TotalAmount { get; init; }
     public decimal AttributedCost { get; init; }
     public decimal SharedCost { get; init; }
+    public decimal FixedChargesTotal { get; init; }
     public IReadOnlyList<BillSplitBandDto> Bands { get; init; } = [];
     public IReadOnlyList<BillSplitMemberSettlementDto> Members { get; init; } = [];
     public string CalculationVersion { get; init; } = "v1";

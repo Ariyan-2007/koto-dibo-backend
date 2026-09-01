@@ -133,6 +133,70 @@ public class BillSplitServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_TariffMeteredWithFixedCharges_PersistsThem()
+    {
+        GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
+        GivenActiveMembers(Membership(HouseholdRole.Member, "ariyan"), Membership(HouseholdRole.Member, "rihan"));
+        GivenTariffConfig(BangladeshLikeTariff());
+
+        var result = await _sut.CreateAsync("household-1", "ariyan", new CreateBillSplitRequest
+        {
+            Title = "January electricity",
+            SplitMethod = "TariffMetered",
+            PeriodFrom = PeriodFrom,
+            PeriodTo = PeriodTo,
+            Currency = "BDT",
+            TariffCountry = "BD",
+            MainMeterUsage = 500m,
+            MemberInputs = [new BillSplitMemberInputDto { UserId = "ariyan", Value = 350m }, new BillSplitMemberInputDto { UserId = "rihan", Value = 100m }],
+            FixedCharges = [new BillSplitFixedChargeDto { Label = "Demand Charge", Amount = 300m }, new BillSplitFixedChargeDto { Label = "VAT", Amount = 150m }],
+        });
+
+        result.FixedCharges.Should().HaveCount(2);
+        result.FixedCharges.Should().ContainSingle(c => c.Label == "Demand Charge" && c.Amount == 300m);
+    }
+
+    [Fact]
+    public async Task CreateAsync_EqualSplitWithFixedCharges_IgnoresThem()
+    {
+        GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
+
+        var result = await _sut.CreateAsync("household-1", "ariyan", new CreateBillSplitRequest
+        {
+            Title = "Wifi",
+            SplitMethod = "EqualSplit",
+            PeriodFrom = PeriodFrom,
+            PeriodTo = PeriodTo,
+            Currency = "BDT",
+            TotalAmount = 1000m,
+            FixedCharges = [new BillSplitFixedChargeDto { Label = "Should be ignored", Amount = 50m }],
+        });
+
+        result.FixedCharges.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateAsync_FixedChargeZeroAmount_ThrowsFluentValidationException()
+    {
+        GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
+
+        var act = () => _sut.CreateAsync("household-1", "ariyan", new CreateBillSplitRequest
+        {
+            Title = "Bad fixed charge",
+            SplitMethod = "TariffMetered",
+            PeriodFrom = PeriodFrom,
+            PeriodTo = PeriodTo,
+            Currency = "BDT",
+            TariffCountry = "BD",
+            MainMeterUsage = 100m,
+            MemberInputs = [new BillSplitMemberInputDto { UserId = "ariyan", Value = 50m }],
+            FixedCharges = [new BillSplitFixedChargeDto { Label = "VAT", Amount = 0m }],
+        });
+
+        await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+    }
+
+    [Fact]
     public async Task CreateAsync_SubMeterSumExceedsMainMeterUsage_ThrowsFluentValidationException()
     {
         GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
@@ -234,6 +298,31 @@ public class BillSplitServiceTests
         result.SharedCost.Should().Be(250m);
         result.Members.Sum(m => m.TotalOwed).Should().Be(result.TotalAmount);
         result.Members.Single(m => m.UserId == "tanvir").AttributedCost.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task GetSettlementAsync_TariffMeteredWithFixedCharges_SplitsEquallyAcrossActiveMembersRegardlessOfUsage()
+    {
+        var entity = TariffMeteredBillSplit("ariyan");
+        entity.FixedCharges = [new BillSplitFixedCharge { Label = "Demand Charge", Amount = 300m }, new BillSplitFixedCharge { Label = "VAT", Amount = 150m }];
+        GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
+        GivenExistingBillSplit(entity);
+        GivenTariffConfig(BangladeshLikeTariff());
+        GivenActiveMembers(
+            Membership(HouseholdRole.Member, "ariyan"),
+            Membership(HouseholdRole.Member, "rihan"),
+            Membership(HouseholdRole.Member, "tanvir"));
+
+        var result = await _sut.GetSettlementAsync("household-1", "ariyan", "billsplit-1");
+
+        result.FixedChargesTotal.Should().Be(450m);
+        result.TotalAmount.Should().Be(4050m);
+
+        var tanvir = result.Members.Single(m => m.UserId == "tanvir");
+        tanvir.FixedChargeShare.Should().Be(150m);
+        tanvir.TotalOwed.Should().Be(233.33m); // 0 attributed + 83.33 shared + 150 fixed charge share
+
+        result.Members.Sum(m => m.TotalOwed).Should().Be(result.TotalAmount);
     }
 
     [Fact]

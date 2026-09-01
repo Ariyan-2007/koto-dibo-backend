@@ -16,6 +16,11 @@ public class BillSplitConfiguration : IMongoClassMapConfiguration
             BsonClassMap.RegisterClassMap<BillSplitMemberInput>(cm => cm.AutoMap());
         }
 
+        if (!BsonClassMap.IsClassMapRegistered(typeof(BillSplitFixedCharge)))
+        {
+            BsonClassMap.RegisterClassMap<BillSplitFixedCharge>(cm => cm.AutoMap());
+        }
+
         if (BsonClassMap.IsClassMapRegistered(typeof(BillSplit)))
         {
             return;

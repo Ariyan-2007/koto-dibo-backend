@@ -6,6 +6,12 @@ public record BillSplitMemberInputDto
     public decimal Value { get; init; }
 }
 
+public record BillSplitFixedChargeDto
+{
+    public string Label { get; init; } = string.Empty;
+    public decimal Amount { get; init; }
+}
+
 public record BillSplitDto
 {
     public string Id { get; init; } = string.Empty;
@@ -21,6 +27,7 @@ public record BillSplitDto
     public decimal? MainMeterUsage { get; init; }
     public decimal? TotalAmount { get; init; }
     public IReadOnlyList<BillSplitMemberInputDto> MemberInputs { get; init; } = [];
+    public IReadOnlyList<BillSplitFixedChargeDto> FixedCharges { get; init; } = [];
     public string? Notes { get; init; }
     public string Status { get; init; } = string.Empty;
     public DateTime CreatedAt { get; init; }

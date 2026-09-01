@@ -9,5 +9,6 @@ public record UpdateBillSplitRequest
     public decimal? MainMeterUsage { get; init; }
     public decimal? TotalAmount { get; init; }
     public IReadOnlyList<BillSplitMemberInputDto>? MemberInputs { get; init; }
+    public IReadOnlyList<BillSplitFixedChargeDto>? FixedCharges { get; init; }
     public string? Notes { get; init; }
 }

@@ -8,7 +8,12 @@ public class CreateBazarPurchaseRequestValidator : AbstractValidator<CreateBazar
     public CreateBazarPurchaseRequestValidator()
     {
         RuleFor(x => x.Date).NotEqual(default(DateOnly));
-        RuleFor(x => x.Amount).GreaterThan(0);
+
+        // Negative amounts are allowed on purpose: an entry like "-700, Leftover" is how unspent
+        // shopping cash held over to next month is recorded — it deflates this month's FoodCost
+        // (MealCalculationService just sums Amount) without needing a separate concept. Only exactly
+        // zero is meaningless as a purchase and rejected.
+        RuleFor(x => x.Amount).NotEqual(0);
         RuleFor(x => x.Currency)
             .NotEmpty()
             .Matches("^[A-Za-z]{3}$")

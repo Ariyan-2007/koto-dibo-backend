@@ -92,6 +92,24 @@ public class BazarPurchaseServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_NegativeAmount_RecordsLeftoverEntry()
+    {
+        // Mirrors the real household's spreadsheet convention: an entry like "-700, Leftover"
+        // records unspent shopping cash carried into next month, deflating this month's FoodCost.
+        GivenMembership(Membership(HouseholdRole.Member, "ariyan"));
+
+        var result = await _sut.CreateAsync("household-1", "ariyan", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = -700m,
+            Currency = "BDT",
+            Note = "Leftover",
+        });
+
+        result.Amount.Should().Be(-700m);
+    }
+
+    [Fact]
     public async Task CreateAsync_ZeroAmount_ThrowsValidationException()
     {
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));

@@ -19,5 +19,9 @@ public record CreateBillSplitRequest
     // TariffMetered: sub-meter usage per member. WeightedSplit: fixed weight per member.
     public IReadOnlyList<BillSplitMemberInputDto> MemberInputs { get; init; } = [];
 
+    // TariffMetered only: non-usage-based line items (demand charge, VAT, meter rent, ...) split
+    // equally across active members. Ignored for EqualSplit/WeightedSplit.
+    public IReadOnlyList<BillSplitFixedChargeDto> FixedCharges { get; init; } = [];
+
     public string? Notes { get; init; }
 }

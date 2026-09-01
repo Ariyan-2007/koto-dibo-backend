@@ -20,5 +20,11 @@ public class UpdateBillSplitRequestValidator : AbstractValidator<UpdateBillSplit
             input.RuleFor(i => i.UserId).NotEmpty();
             input.RuleFor(i => i.Value).GreaterThanOrEqualTo(0m);
         }).When(x => x.MemberInputs is not null);
+
+        RuleForEach(x => x.FixedCharges).ChildRules(charge =>
+        {
+            charge.RuleFor(c => c.Label).NotEmpty().MaximumLength(100);
+            charge.RuleFor(c => c.Amount).GreaterThan(0m).WithMessage("Fixed charge amount must be greater than zero.");
+        }).When(x => x.FixedCharges is not null);
     }
 }

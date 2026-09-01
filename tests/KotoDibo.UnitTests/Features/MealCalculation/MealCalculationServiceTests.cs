@@ -155,6 +155,21 @@ public class MealCalculationServiceTests
     }
 
     [Fact]
+    public async Task GetMealRateAsync_NegativeLeftoverPurchase_DeflatesFoodCost()
+    {
+        // A "-700, Leftover" Bazar entry (unspent cash carried from a prior month) reduces this
+        // month's FoodCost baseline exactly like the household's real spreadsheet does.
+        _purchases.Setup(x => x.FindAsync(It.IsAny<Expression<Func<BazarPurchase, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Purchase("ariyan", 17700m), Purchase("ariyan", -700m)]);
+        _mealEntries.Setup(x => x.FindAsync(It.IsAny<Expression<Func<DailyMealEntry, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([MealEntry("ariyan", 292, From)]);
+
+        var result = await _sut.GetMealRateAsync("household-1", "caller-1", From, To);
+
+        result.FoodCost.Should().Be(17000m);
+    }
+
+    [Fact]
     public async Task GetMealRateAsync_ToBeforeFrom_ThrowsValidationException()
     {
         var act = () => _sut.GetMealRateAsync("household-1", "caller-1", To, From, CancellationToken.None);

@@ -32,6 +32,12 @@ public class BillSplit
     // Unused (empty) for EqualSplit, which divides across the household's current active members.
     public List<BillSplitMemberInput> MemberInputs { get; set; } = [];
 
+    // TariffMetered only: non-usage-based line items on the same bill (demand charge, VAT, meter
+    // rent, etc.) — billed per connection, not per kWh, so they're split equally across the
+    // household's current active members rather than folded into the kWh-proportional calculation.
+    // Unused (empty) for EqualSplit/WeightedSplit, which already split their whole TotalAmount flat.
+    public List<BillSplitFixedCharge> FixedCharges { get; set; } = [];
+
     public string? Notes { get; set; }
     public FinancialEntryStatus Status { get; set; } = FinancialEntryStatus.Active;
     public DateTime CreatedAt { get; set; }
@@ -42,4 +48,10 @@ public class BillSplitMemberInput
 {
     public string UserId { get; set; } = string.Empty;
     public decimal Value { get; set; }
+}
+
+public class BillSplitFixedCharge
+{
+    public string Label { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
 }
