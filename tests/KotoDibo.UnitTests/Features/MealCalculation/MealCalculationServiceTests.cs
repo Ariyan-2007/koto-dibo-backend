@@ -103,20 +103,31 @@ public class MealCalculationServiceTests
     }
 
     [Fact]
-    public async Task GetMealRateAsync_ContributionCombinesPurchasesPaidAndDirectDeposits()
+    public async Task GetMealRateAsync_ContributionCombinesMirroredBazarAndDirectDeposits()
     {
         // Mirrors the spreadsheet's Ariyan wallet formula: purchases he personally paid for
-        // (560 + 470) plus direct cash top-ups (2450 + 160 + 100 + 500) = 4240 total.
+        // (560 + 470) plus direct cash top-ups (2450 + 160 + 100 + 500) = 4240 total. Since
+        // BazarPurchaseService now auto-mirrors a personally-paid purchase as a Contribution at
+        // creation time, that mirrored row — not the BazarPurchase itself — is what carries the
+        // 560/470 credit here; summing both would double-count it (see MealCalculationService).
         _purchases.Setup(x => x.FindAsync(It.IsAny<Expression<Func<BazarPurchase, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([Purchase("ariyan", 560m), Purchase("ariyan", 470m)]);
         _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([ContributionEntry("ariyan", 2450m), ContributionEntry("ariyan", 160m), ContributionEntry("ariyan", 100m), ContributionEntry("ariyan", 500m)]);
+            .ReturnsAsync([
+                ContributionEntry("ariyan", 560m),
+                ContributionEntry("ariyan", 470m),
+                ContributionEntry("ariyan", 2450m),
+                ContributionEntry("ariyan", 160m),
+                ContributionEntry("ariyan", 100m),
+                ContributionEntry("ariyan", 500m),
+            ]);
         _mealEntries.Setup(x => x.FindAsync(It.IsAny<Expression<Func<DailyMealEntry, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([MealEntry("ariyan", 10, From)]);
 
         var result = await _sut.GetMealRateAsync("household-1", "caller-1", From, To);
 
         var ariyan = result.Members.Single(m => m.UserId == "ariyan");
+        ariyan.BazarSpend.Should().Be(1030m);
         ariyan.Contribution.Should().Be(4240m);
         ariyan.GiveTake.Should().Be(ariyan.Contribution - ariyan.MealCost);
     }

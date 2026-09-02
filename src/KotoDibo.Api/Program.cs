@@ -3,6 +3,7 @@ using KotoDibo.Application;
 using KotoDibo.Infrastructure.Extensions;
 using KotoDibo.Infrastructure.Persistence.MongoDb;
 using KotoDibo.Infrastructure.Persistence.MongoDb.Indexes;
+using KotoDibo.Infrastructure.Persistence.MongoDb.Migrations;
 using KotoDibo.Infrastructure.Persistence.MongoDb.Seeding;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +17,7 @@ var app = builder.Build();
 var mongoDbContext = app.Services.GetRequiredService<MongoDbContext>();
 await MongoIndexInitializer.InitializeAsync(mongoDbContext);
 await TariffConfigSeeder.SeedAsync(mongoDbContext);
+await BazarContributionMirrorBackfill.RunAsync(mongoDbContext);
 
 app.UseApiPipeline();
 

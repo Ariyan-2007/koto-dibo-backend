@@ -22,6 +22,10 @@ public class BazarPurchaseIndexConfiguration : IMongoIndexConfiguration
             // Active-only date-range scan — the calculation engine's main query.
             new(Builders<BazarPurchase>.IndexKeys.Ascending(p => p.HouseholdId).Ascending(p => p.Status).Ascending(p => p.Date),
                 new CreateIndexOptions { Name = "ix_bazarpurchase_householdid_status_date" }),
+
+            // Household balance calculation — all-time (no date bound), filtered to fund-funded spend.
+            new(Builders<BazarPurchase>.IndexKeys.Ascending(p => p.HouseholdId).Ascending(p => p.Status).Ascending(p => p.FundingSource),
+                new CreateIndexOptions { Name = "ix_bazarpurchase_householdid_status_fundingsource" }),
         ];
 
         await collection.Indexes.CreateManyAsync(models, cancellationToken);

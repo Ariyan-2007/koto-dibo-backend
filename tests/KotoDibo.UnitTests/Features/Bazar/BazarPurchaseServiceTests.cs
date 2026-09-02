@@ -4,6 +4,7 @@ using KotoDibo.Application.Common.Interfaces;
 using KotoDibo.Application.Features.Bazar.DTOs;
 using KotoDibo.Application.Features.Bazar.Services;
 using KotoDibo.Application.Features.Bazar.Validators;
+using KotoDibo.Application.Features.HouseholdBalance.Interfaces;
 using KotoDibo.Application.Features.Households.Services;
 using KotoDibo.Domain.Entities;
 using KotoDibo.Domain.Enums;
@@ -18,6 +19,8 @@ public class BazarPurchaseServiceTests
     private static readonly DateOnly Today = DateOnly.FromDateTime(Now);
 
     private readonly Mock<IRepository<BazarPurchase>> _purchases = new();
+    private readonly Mock<IRepository<Contribution>> _contributions = new();
+    private readonly Mock<IHouseholdBalanceService> _householdBalanceService = new();
     private readonly Mock<IRepository<HouseholdMembership>> _memberships = new();
     private readonly Mock<IDateTimeProvider> _dateTimeProvider = new();
 
@@ -29,11 +32,18 @@ public class BazarPurchaseServiceTests
         _purchases.Setup(x => x.AddAsync(It.IsAny<BazarPurchase>(), It.IsAny<CancellationToken>()))
             .Callback<BazarPurchase, CancellationToken>((p, _) => p.Id = "purchase-1")
             .ReturnsAsync((BazarPurchase p, CancellationToken _) => p);
+        _contributions.Setup(x => x.AddAsync(It.IsAny<Contribution>(), It.IsAny<CancellationToken>()))
+            .Callback<Contribution, CancellationToken>((c, _) => c.Id = "mirrored-contribution-1")
+            .ReturnsAsync((Contribution c, CancellationToken _) => c);
+        _householdBalanceService.Setup(x => x.GetCurrentBalanceAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0m);
 
         var access = new HouseholdAccessService(_memberships.Object);
 
         _sut = new BazarPurchaseService(
             _purchases.Object,
+            _contributions.Object,
+            _householdBalanceService.Object,
             access,
             _dateTimeProvider.Object,
             new CreateBazarPurchaseRequestValidator(),
@@ -263,5 +273,108 @@ public class BazarPurchaseServiceTests
         var result = await _sut.CancelAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
 
         result.Status.Should().Be(nameof(FinancialEntryStatus.Cancelled));
+    }
+
+    [Fact]
+    public async Task CreateAsync_PersonalFunding_AutoCreatesMirroredContribution()
+    {
+        // The core accounting rule: paying for Bazar out of pocket is, from the household's point
+        // of view, indistinguishable from depositing that same amount and immediately spending it.
+        GivenMembership(Membership(HouseholdRole.Member, "ariyan"));
+
+        var result = await _sut.CreateAsync("household-1", "ariyan", "ariyan", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = 2000m,
+            Currency = "BDT",
+            FundingSource = nameof(BazarFundingSource.Personal),
+        });
+
+        result.FundingSource.Should().Be(nameof(BazarFundingSource.Personal));
+        result.LinkedContributionId.Should().Be("mirrored-contribution-1");
+        _contributions.Verify(x => x.AddAsync(
+            It.Is<Contribution>(c => c.ContributedByUserId == "ariyan" && c.Amount == 2000m && c.SourceType == ContributionSourceType.AutoFromBazar && c.SourceBazarPurchaseId == "purchase-1"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateAsync_HouseholdFundFunding_WithSufficientBalance_DoesNotCreateContribution()
+    {
+        // Waythin drawing 2000 out of an existing 3000 balance: the fund is depleted, but Waythin
+        // never personally handed the household any money, so no mirrored Contribution is created.
+        _householdBalanceService.Setup(x => x.GetCurrentBalanceAsync("household-1", It.IsAny<CancellationToken>())).ReturnsAsync(3000m);
+        GivenMembership(Membership(HouseholdRole.Member, "waythin"));
+
+        var result = await _sut.CreateAsync("household-1", "waythin", "waythin", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = 2000m,
+            Currency = "BDT",
+            FundingSource = nameof(BazarFundingSource.HouseholdFund),
+        });
+
+        result.FundingSource.Should().Be(nameof(BazarFundingSource.HouseholdFund));
+        result.LinkedContributionId.Should().BeNull();
+        _contributions.Verify(x => x.AddAsync(It.IsAny<Contribution>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateAsync_HouseholdFundFunding_ExceedsBalance_ThrowsInsufficientFunds()
+    {
+        _householdBalanceService.Setup(x => x.GetCurrentBalanceAsync("household-1", It.IsAny<CancellationToken>())).ReturnsAsync(1000m);
+        GivenMembership(Membership(HouseholdRole.Member, "waythin"));
+
+        var act = () => _sut.CreateAsync("household-1", "waythin", "waythin", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = 2000m,
+            Currency = "BDT",
+            FundingSource = nameof(BazarFundingSource.HouseholdFund),
+        });
+
+        await act.Should().ThrowAsync<InsufficientFundsException>();
+    }
+
+    [Fact]
+    public async Task CreateAsync_NegativeAmountWithHouseholdFund_ThrowsValidationException()
+    {
+        GivenMembership(Membership(HouseholdRole.Member, "ariyan"));
+
+        var act = () => _sut.CreateAsync("household-1", "ariyan", "ariyan", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = -700m,
+            Currency = "BDT",
+            FundingSource = nameof(BazarFundingSource.HouseholdFund),
+        });
+
+        await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+    }
+
+    [Fact]
+    public async Task CancelAsync_PersonalFundedPurchase_CascadeCancelsLinkedContribution()
+    {
+        var purchase = ActivePurchase(purchasedByUserId: "buyer-1");
+        purchase.LinkedContributionId = "mirrored-contribution-1";
+        var linkedContribution = new Contribution
+        {
+            Id = "mirrored-contribution-1",
+            HouseholdId = "household-1",
+            ContributedByUserId = "buyer-1",
+            Amount = 500m,
+            Currency = "BDT",
+            SourceType = ContributionSourceType.AutoFromBazar,
+            SourceBazarPurchaseId = "purchase-1",
+            Status = FinancialEntryStatus.Active,
+        };
+        GivenExistingPurchase(purchase);
+        _contributions.Setup(x => x.GetByIdAsync("mirrored-contribution-1", It.IsAny<CancellationToken>())).ReturnsAsync(linkedContribution);
+        GivenMembership(Membership(HouseholdRole.Member, "buyer-1"));
+
+        await _sut.CancelAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
+
+        _contributions.Verify(x => x.UpdateAsync(
+            It.Is<Contribution>(c => c.Id == "mirrored-contribution-1" && c.Status == FinancialEntryStatus.Cancelled),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

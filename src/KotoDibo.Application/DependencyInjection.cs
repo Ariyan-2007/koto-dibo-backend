@@ -13,6 +13,8 @@ using KotoDibo.Application.Features.Contributions.Interfaces;
 using KotoDibo.Application.Features.Contributions.Services;
 using KotoDibo.Application.Features.Expenses.Interfaces;
 using KotoDibo.Application.Features.Expenses.Services;
+using KotoDibo.Application.Features.HouseholdBalance.Interfaces;
+using KotoDibo.Application.Features.HouseholdBalance.Services;
 using KotoDibo.Application.Features.Households.Interfaces;
 using KotoDibo.Application.Features.Households.Services;
 using KotoDibo.Application.Features.MealCalculation.Interfaces;
@@ -48,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<IMealCalculationService, MealCalculationService>();
         services.AddScoped<IBazarPurchaseService, BazarPurchaseService>();
         services.AddScoped<IContributionService, ContributionService>();
+        services.AddScoped<IHouseholdBalanceService, HouseholdBalanceService>();
         services.AddScoped<IBillSplitService, BillSplitService>();
         services.AddScoped<ISettlementService, SettlementService>();
         services.AddScoped<IExpenseService, ExpenseService>();

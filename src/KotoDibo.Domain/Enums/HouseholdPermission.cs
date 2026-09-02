@@ -23,6 +23,8 @@ public enum HouseholdPermission
     UpdateContribution,
     CancelContribution,
 
+    ViewHouseholdBalance,
+
     RecordOwnMealCount,
     RecordAnyMealCount,
     ViewMeals,

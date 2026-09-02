@@ -3,6 +3,7 @@ using KotoDibo.Application.Common.Exceptions;
 using KotoDibo.Application.Common.Interfaces;
 using KotoDibo.Application.Features.Bazar.DTOs;
 using KotoDibo.Application.Features.Bazar.Interfaces;
+using KotoDibo.Application.Features.HouseholdBalance.Interfaces;
 using KotoDibo.Domain.Entities;
 using KotoDibo.Domain.Enums;
 using KotoDibo.Domain.Exceptions;
@@ -13,6 +14,8 @@ namespace KotoDibo.Application.Features.Bazar.Services;
 public class BazarPurchaseService : IBazarPurchaseService
 {
     private readonly IRepository<BazarPurchase> _purchases;
+    private readonly IRepository<Contribution> _contributions;
+    private readonly IHouseholdBalanceService _householdBalanceService;
     private readonly IHouseholdAccessService _access;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IValidator<CreateBazarPurchaseRequest> _createValidator;
@@ -20,12 +23,16 @@ public class BazarPurchaseService : IBazarPurchaseService
 
     public BazarPurchaseService(
         IRepository<BazarPurchase> purchases,
+        IRepository<Contribution> contributions,
+        IHouseholdBalanceService householdBalanceService,
         IHouseholdAccessService access,
         IDateTimeProvider dateTimeProvider,
         IValidator<CreateBazarPurchaseRequest> createValidator,
         IValidator<UpdateBazarPurchaseRequest> updateValidator)
     {
         _purchases = purchases;
+        _contributions = contributions;
+        _householdBalanceService = householdBalanceService;
         _access = access;
         _dateTimeProvider = dateTimeProvider;
         _createValidator = createValidator;
@@ -43,6 +50,14 @@ public class BazarPurchaseService : IBazarPurchaseService
         // Confirms the target is an active member of this household (everyone has ViewHousehold).
         await _access.RequireMembershipAsync(householdId, targetUserId, HouseholdPermission.ViewHousehold, cancellationToken);
 
+        var fundingSource = ParseFundingSource(request.FundingSource);
+        var currency = request.Currency.Trim().ToUpperInvariant();
+
+        if (fundingSource == BazarFundingSource.HouseholdFund)
+        {
+            await RequireSufficientBalanceAsync(householdId, request.Amount, currency, cancellationToken);
+        }
+
         var now = _dateTimeProvider.UtcNow;
         var purchase = new BazarPurchase
         {
@@ -50,14 +65,26 @@ public class BazarPurchaseService : IBazarPurchaseService
             PurchasedByUserId = targetUserId,
             Date = request.Date,
             Amount = request.Amount,
-            Currency = request.Currency.Trim().ToUpperInvariant(),
+            Currency = currency,
             Note = request.Note?.Trim(),
+            FundingSource = fundingSource,
             Status = FinancialEntryStatus.Active,
             CreatedAt = now,
             UpdatedAt = now,
         };
 
         await _purchases.AddAsync(purchase, cancellationToken);
+
+        // A purchase paid personally is, from the household's point of view, money the buyer just
+        // put in and immediately spent — so it counts as a Contribution too. A leftover/correction
+        // entry (Amount <= 0) has no such mirror: there's no cash to credit for a negative spend.
+        if (fundingSource == BazarFundingSource.Personal && purchase.Amount > 0)
+        {
+            var contribution = await CreateLinkedContributionAsync(purchase, now, cancellationToken);
+            purchase.LinkedContributionId = contribution.Id;
+            await _purchases.UpdateAsync(purchase, cancellationToken);
+        }
+
         return ToDto(purchase);
     }
 
@@ -102,6 +129,10 @@ public class BazarPurchaseService : IBazarPurchaseService
         RequireEditAccess(membership.Role, purchase.PurchasedByUserId, callerUserId, HouseholdPermission.UpdateBazarPurchase, "Bazar purchase");
         RequireActive(purchase);
 
+        var oldFundingSource = purchase.FundingSource;
+        var oldAmount = purchase.Amount;
+        var oldLinkedContributionId = purchase.LinkedContributionId;
+
         if (request.Date is { } newDate)
         {
             RequireNotFuture(newDate, nameof(request.Date));
@@ -123,7 +154,33 @@ public class BazarPurchaseService : IBazarPurchaseService
             purchase.Note = request.Note.Trim();
         }
 
+        if (request.FundingSource is not null)
+        {
+            purchase.FundingSource = ParseFundingSource(request.FundingSource);
+        }
+
+        if (purchase.Amount < 0 && purchase.FundingSource == BazarFundingSource.HouseholdFund)
+        {
+            throw FieldValidationException(nameof(request.FundingSource), "A negative (leftover) amount can only use FundingSource 'Personal'.");
+        }
+
+        if (purchase.FundingSource == BazarFundingSource.HouseholdFund)
+        {
+            // Add back this purchase's own prior draw (if any) before checking, so editing an
+            // existing fund-funded purchase isn't compared against a balance that already has it
+            // subtracted out once.
+            var currentBalance = await _householdBalanceService.GetCurrentBalanceAsync(householdId, cancellationToken);
+            var balanceExcludingThisPurchase = currentBalance + (oldFundingSource == BazarFundingSource.HouseholdFund ? oldAmount : 0m);
+
+            if (purchase.Amount > balanceExcludingThisPurchase)
+            {
+                throw new InsufficientFundsException(
+                    $"The household's current balance is {balanceExcludingThisPurchase} {purchase.Currency}, which is not enough to cover a {purchase.Amount} {purchase.Currency} purchase from the shared fund.");
+            }
+        }
+
         purchase.UpdatedAt = _dateTimeProvider.UtcNow;
+        await ReconcileLinkedContributionAsync(purchase, oldLinkedContributionId, cancellationToken);
         await _purchases.UpdateAsync(purchase, cancellationToken);
         return ToDto(purchase);
     }
@@ -138,9 +195,102 @@ public class BazarPurchaseService : IBazarPurchaseService
 
         purchase.Status = FinancialEntryStatus.Cancelled;
         purchase.UpdatedAt = _dateTimeProvider.UtcNow;
+
+        // The mirrored Contribution only exists because this purchase does — once the purchase is
+        // cancelled, the household never actually received that money, so the mirror must go too.
+        if (purchase.LinkedContributionId is not null)
+        {
+            await CancelLinkedContributionAsync(purchase.LinkedContributionId, cancellationToken);
+        }
+
         await _purchases.UpdateAsync(purchase, cancellationToken);
         return ToDto(purchase);
     }
+
+    private async Task RequireSufficientBalanceAsync(string householdId, decimal amount, string currency, CancellationToken cancellationToken)
+    {
+        var balance = await _householdBalanceService.GetCurrentBalanceAsync(householdId, cancellationToken);
+        if (amount > balance)
+        {
+            throw new InsufficientFundsException(
+                $"The household's current balance is {balance} {currency}, which is not enough to cover a {amount} {currency} purchase from the shared fund.");
+        }
+    }
+
+    private async Task<Contribution> CreateLinkedContributionAsync(BazarPurchase purchase, DateTime now, CancellationToken cancellationToken)
+    {
+        var contribution = new Contribution
+        {
+            HouseholdId = purchase.HouseholdId,
+            ContributedByUserId = purchase.PurchasedByUserId,
+            Date = purchase.Date,
+            Amount = purchase.Amount,
+            Currency = purchase.Currency,
+            Notes = "Auto-generated from a Bazar purchase paid personally.",
+            SourceType = ContributionSourceType.AutoFromBazar,
+            SourceBazarPurchaseId = purchase.Id,
+            Status = FinancialEntryStatus.Active,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        await _contributions.AddAsync(contribution, cancellationToken);
+        return contribution;
+    }
+
+    // Brings the mirrored Contribution in line with the purchase's post-edit state: creates one if
+    // the purchase newly qualifies (e.g. switched to Personal, or a leftover amount became
+    // positive), updates it in place if it already exists, or cancels it if the purchase no longer
+    // qualifies (e.g. switched to HouseholdFund).
+    private async Task ReconcileLinkedContributionAsync(BazarPurchase purchase, string? oldLinkedContributionId, CancellationToken cancellationToken)
+    {
+        var shouldHaveContribution = purchase.FundingSource == BazarFundingSource.Personal && purchase.Amount > 0;
+
+        if (!shouldHaveContribution)
+        {
+            if (oldLinkedContributionId is not null)
+            {
+                await CancelLinkedContributionAsync(oldLinkedContributionId, cancellationToken);
+                purchase.LinkedContributionId = null;
+            }
+
+            return;
+        }
+
+        if (oldLinkedContributionId is not null)
+        {
+            var existing = await _contributions.GetByIdAsync(oldLinkedContributionId, cancellationToken);
+            if (existing is not null && existing.Status == FinancialEntryStatus.Active)
+            {
+                existing.ContributedByUserId = purchase.PurchasedByUserId;
+                existing.Date = purchase.Date;
+                existing.Amount = purchase.Amount;
+                existing.Currency = purchase.Currency;
+                existing.UpdatedAt = _dateTimeProvider.UtcNow;
+                await _contributions.UpdateAsync(existing, cancellationToken);
+                purchase.LinkedContributionId = existing.Id;
+                return;
+            }
+        }
+
+        var created = await CreateLinkedContributionAsync(purchase, _dateTimeProvider.UtcNow, cancellationToken);
+        purchase.LinkedContributionId = created.Id;
+    }
+
+    private async Task CancelLinkedContributionAsync(string contributionId, CancellationToken cancellationToken)
+    {
+        var contribution = await _contributions.GetByIdAsync(contributionId, cancellationToken);
+        if (contribution is null || contribution.Status != FinancialEntryStatus.Active)
+        {
+            return;
+        }
+
+        contribution.Status = FinancialEntryStatus.Cancelled;
+        contribution.UpdatedAt = _dateTimeProvider.UtcNow;
+        await _contributions.UpdateAsync(contribution, cancellationToken);
+    }
+
+    private static BazarFundingSource ParseFundingSource(string value) => Enum.Parse<BazarFundingSource>(value, ignoreCase: true);
 
     private async Task<BazarPurchase> GetOwnedPurchaseAsync(string householdId, string purchaseId, CancellationToken cancellationToken)
     {
@@ -158,10 +308,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         var today = Common.LocalDate.TodayFor(_dateTimeProvider.UtcNow);
         if (date > today)
         {
-            throw new KotoDibo.Application.Common.Exceptions.ValidationException(new Dictionary<string, string[]>
-            {
-                [field] = ["Date cannot be in the future."],
-            });
+            throw FieldValidationException(field, "Date cannot be in the future.");
         }
     }
 
@@ -196,6 +343,11 @@ public class BazarPurchaseService : IBazarPurchaseService
         }
     }
 
+    private static KotoDibo.Application.Common.Exceptions.ValidationException FieldValidationException(string field, string message) => new(new Dictionary<string, string[]>
+    {
+        [field] = [message],
+    });
+
     private static BazarPurchaseDto ToDto(BazarPurchase purchase) => new()
     {
         Id = purchase.Id,
@@ -205,6 +357,8 @@ public class BazarPurchaseService : IBazarPurchaseService
         Amount = purchase.Amount,
         Currency = purchase.Currency,
         Note = purchase.Note,
+        FundingSource = purchase.FundingSource.ToString(),
+        LinkedContributionId = purchase.LinkedContributionId,
         Status = purchase.Status.ToString(),
         CreatedAt = purchase.CreatedAt,
         UpdatedAt = purchase.UpdatedAt,

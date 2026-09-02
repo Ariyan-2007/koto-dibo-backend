@@ -25,6 +25,8 @@ public class BazarPurchaseConfiguration : IMongoClassMapConfiguration
                 .SetIdGenerator(StringObjectIdGenerator.Instance);
             cm.GetMemberMap(x => x.Status)
                 .SetSerializer(new EnumSerializer<FinancialEntryStatus>(BsonType.String));
+            cm.GetMemberMap(x => x.FundingSource)
+                .SetSerializer(new EnumSerializer<BazarFundingSource>(BsonType.String));
         });
     }
 }

@@ -1,5 +1,6 @@
 using FluentValidation;
 using KotoDibo.Application.Features.Bazar.DTOs;
+using KotoDibo.Domain.Enums;
 
 namespace KotoDibo.Application.Features.Bazar.Validators;
 
@@ -16,5 +17,14 @@ public class UpdateBazarPurchaseRequestValidator : AbstractValidator<UpdateBazar
             .WithMessage("Currency must be a 3-letter ISO 4217 code.")
             .When(x => x.Currency is not null);
         RuleFor(x => x.Note).MaximumLength(500);
+
+        RuleFor(x => x.FundingSource)
+            .Must(value => Enum.TryParse<BazarFundingSource>(value, ignoreCase: true, out _))
+            .When(x => x.FundingSource is not null)
+            .WithMessage("FundingSource must be either 'Personal' or 'HouseholdFund'.");
+
+        // The negative-amount + HouseholdFund combination is rejected in BazarPurchaseService
+        // instead of here, since Update only patches one field at a time and the rule needs the
+        // resulting Amount and FundingSource together after the patch is applied.
     }
 }

@@ -25,6 +25,8 @@ public class ContributionConfiguration : IMongoClassMapConfiguration
                 .SetIdGenerator(StringObjectIdGenerator.Instance);
             cm.GetMemberMap(x => x.Status)
                 .SetSerializer(new EnumSerializer<FinancialEntryStatus>(BsonType.String));
+            cm.GetMemberMap(x => x.SourceType)
+                .SetSerializer(new EnumSerializer<ContributionSourceType>(BsonType.String));
         });
     }
 }

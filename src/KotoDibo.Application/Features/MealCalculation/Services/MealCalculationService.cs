@@ -79,12 +79,19 @@ public class MealCalculationService : IMealCalculationService
         {
             var mealUnits = weightsByUser.GetValueOrDefault(userId, 0m);
             var mealCost = mealCostByUser.GetValueOrDefault(userId, 0m);
-            var contribution = purchasesByUser.GetValueOrDefault(userId, 0m) + contributionsByUser.GetValueOrDefault(userId, 0m);
+
+            // A Bazar purchase paid personally (BazarFundingSource.Personal) auto-generates a
+            // mirrored Contribution row for the same amount (see BazarPurchaseService), so
+            // contributionsByUser already reflects it — adding purchasesByUser here too would
+            // double-count that spend. A purchase paid from the household fund intentionally
+            // contributes nothing here: the buyer didn't personally give that money, the fund did.
+            var contribution = contributionsByUser.GetValueOrDefault(userId, 0m);
             return new MealMemberCostDto
             {
                 UserId = userId,
                 MealUnits = mealUnits,
                 MealCost = mealCost,
+                BazarSpend = purchasesByUser.GetValueOrDefault(userId, 0m),
                 Contribution = contribution,
                 GiveTake = contribution - mealCost,
             };
@@ -99,6 +106,7 @@ public class MealCalculationService : IMealCalculationService
             MealRate = totalUnits > 0 ? foodCost / totalUnits : null,
             TotalContributions = members.Sum(m => m.Contribution),
             Members = members,
+            CalculationVersion = "v2",
         };
     }
 

@@ -47,6 +47,8 @@ public class ExceptionHandlingMiddleware
                 HttpStatusCode.NotFound, notFoundException.Message, null),
             DuplicateKeyException duplicateKeyException => (
                 HttpStatusCode.Conflict, duplicateKeyException.Message, null),
+            InsufficientFundsException insufficientFundsException => (
+                HttpStatusCode.Conflict, insufficientFundsException.Message, null),
             DomainException domainException => (
                 HttpStatusCode.BadRequest, domainException.Message, null),
             _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred.", null),
