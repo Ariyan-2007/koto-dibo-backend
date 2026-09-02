@@ -124,7 +124,7 @@ Carried over from `BLUEPRINT.md` §12, sequenced after the two anchor features:
 - Wire `Expenses` and `Budget` controllers to their existing (partial) Application services.
 - `KotoDibo.IntegrationTests` — first real integration test suite, should target meal settlement and fair-split settlement first since they're the highest-value correctness surfaces.
 - `KotoDibo.Common` — fill in as real cross-cutting needs surface from Phases 2–5, not speculatively.
-- `HouseholdMembershipStatus.Invited` — token-based invitation flow, needed once onboarding a household of friends becomes a real flow rather than manual `POST /members`.
+- ~~`HouseholdMembershipStatus.Invited` — token-based invitation flow~~ — **✅ Done**, shipped as a separate `HouseholdInvite` collection (code + QR, redeemed via `POST /api/invites/{code}/accept`) rather than a pending-membership-row/enum value — see `MVP_FRONTEND_BLUEPRINT.md` §1.1 for the full flow and API surface. This also introduced the backend's first CDN-backed storage integration (Cloudflare R2 via `IFileStorageService`, S3-compatible), used to host the generated invite QR PNGs.
 
 ## 8. Suggested sequencing
 

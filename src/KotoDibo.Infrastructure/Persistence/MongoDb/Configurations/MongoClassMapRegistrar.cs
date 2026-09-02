@@ -11,6 +11,7 @@ public static class MongoClassMapRegistrar
             new RefreshTokenConfiguration(),
             new HouseholdConfiguration(),
             new HouseholdMembershipConfiguration(),
+            new HouseholdInviteConfiguration(),
             new BazarPurchaseConfiguration(),
             new ContributionConfiguration(),
             new DailyMealEntryConfiguration(),

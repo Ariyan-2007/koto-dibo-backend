@@ -11,6 +11,7 @@ public static class MongoIndexInitializer
             new RefreshTokenIndexConfiguration(),
             new HouseholdIndexConfiguration(),
             new HouseholdMembershipIndexConfiguration(),
+            new HouseholdInviteIndexConfiguration(),
             new BazarPurchaseIndexConfiguration(),
             new ContributionIndexConfiguration(),
             new DailyMealEntryIndexConfiguration(),
