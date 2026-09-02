@@ -2,7 +2,7 @@
 
 > This document extends `BLUEPRINT.md` (a snapshot of what's built) into a phased delivery plan. `BLUEPRINT.md` stays as-is — a point-in-time system description. This file answers "what ships next, in what order, to reach a usable MVP," anchored on the two features that make the product useful on day one: **meal cost accounting** and **fair bill splitting**.
 
-> **Status (2026-08-31):** Phases 2–4 are implemented backend-side — `FairSplitAllocator`, the full `BillSplit` CRUD + settlement API, and the unified `SettlementService` all ship with unit test coverage (see §3–§5 for what landed). Phases 1 and 5 (UI) and Phase 6 (lower-priority backend gaps) remain open — the companion `MVP_FRONTEND_BLUEPRINT.md` now covers the client-side plan in detail.
+> **Status (2026-09-02):** Phases 2–4 are implemented backend-side — `FairSplitAllocator`, the full `BillSplit` CRUD + settlement API, and the unified `SettlementService` all ship with unit test coverage (see §3–§5 for what landed). Phases 1 and 5 (UI) are done — built in a separate frontend repository, outside this backend codebase, against the API surface documented in `MVP_FRONTEND_BLUEPRINT.md`. Phase 6's `Expenses`/`Budget` controllers are now wired end-to-end (see §7); the integration-test suite and speculative `KotoDibo.Common` work remain the only open items.
 
 ## 0. Why these two systems anchor the MVP
 
@@ -38,7 +38,7 @@ This is worth writing down explicitly, because Phase 2 (bill split) and Phase 4 
 
 This is already implemented correctly — Phase 1 below is about *exposing* it well, not re-solving it.
 
-## 2. Phase 1 — Meal system: close the loop, don't leave it backend-only
+## 2. Phase 1 — Meal system: close the loop, don't leave it backend-only — ✅ Done
 
 The meal engine is solid but currently only reachable via raw API calls. MVP-readiness means a household member can actually *use* it without Swagger.
 
@@ -48,6 +48,8 @@ The meal engine is solid but currently only reachable via raw API calls. MVP-rea
 - Edge-case validation surfaced to the UI (not just the API): overrides on a day with no default set yet, negative counts, entries outside the household's active membership window for that user.
 
 **Acceptance:** a household can run the exact August-2026 dataset from this conversation through the real UI and get the same meal rate and balances back.
+
+**Status:** built — in a separate frontend repository, not this backend codebase — against the API surface `MVP_FRONTEND_BLUEPRINT.md` §Phase 3 documents.
 
 ## 3. Phase 2 — Fair-split domain model (port `TariffEngine` logic into `KotoDibo.Domain`) — ✅ Done
 
@@ -103,9 +105,11 @@ Once both ledgers produce "who owes/is owed" balances independently, add a thin 
 
 This is additive and low-risk: it doesn't touch either allocator's internals, it just sums their outputs.
 
-## 6. Phase 5 — Frontend / PWA
+## 6. Phase 5 — Frontend / PWA — ✅ Done
 
 > See `MVP_FRONTEND_BLUEPRINT.md` for the detailed module-by-module, API-by-API breakdown of this phase. Every backend endpoint it lists (auth, households, bazar, contributions, meals, bill-splits, settlement) is live as of the Phase 2–4 backend work above, so frontend work can start immediately without waiting on further backend changes.
+
+**Status:** built in a separate frontend repository (Vite + React + TypeScript, per the stack below), outside this backend codebase's scope. `MVP_FRONTEND_BLUEPRINT.md` §Phase 7 documents the newly-wired Expenses/Budget API from §7 below, now that it's no longer blocked.
 
 `BLUEPRINT.md` documents backend only — there's no client yet. Reference repo (`FairSplit`) is a good pattern source for the calculator-style UI specifically, not a template to clone wholesale:
 
@@ -121,7 +125,13 @@ This is additive and low-risk: it doesn't touch either allocator's internals, it
 
 Carried over from `BLUEPRINT.md` §12, sequenced after the two anchor features:
 
-- Wire `Expenses` and `Budget` controllers to their existing (partial) Application services.
+- ~~Wire `Expenses` and `Budget` controllers to their existing (partial) Application services.~~ — **✅ Done.** Both were previously `501` stubs sitting in front of `NotImplementedException`-throwing services with empty validators. Unlike Bazar/Contribution/BillSplit, `Expense` and `Budget` are **personal, per-user records — not household-scoped** (no `HouseholdId` on either entity), so they're wired without `IHouseholdAccessService`/`HouseholdPermission` involvement; ownership is simply "caller's own `UserId`," enforced by `ExpenseService`/`BudgetService` on every read.
+  - `ExpensesController` (`api/expenses`, `[Authorize]`): `POST /`, `GET /`, `GET /` accepts optional `from`/`to` query filters (same convention as Bazar/Contribution list endpoints), `GET /{id}`. `CreateExpenseRequestValidator` requires `Amount > 0`, non-empty `Category` (≤100 chars), `Description` ≤500 chars, and a non-default `Date`; the service additionally rejects future-dated entries (mirrors `BazarPurchaseService`'s `RequireNotFuture`, via the same `LocalDate.TodayFor` helper).
+  - `BudgetController` (`api/budget`, `[Authorize]`): `POST /`, `GET /`, `GET /{id}`. `CreateBudgetRequestValidator` requires `Period` in `YYYY-MM` format and `Amount > 0`; `BudgetService` additionally rejects a second budget for the same `(UserId, Period)` pair (one budget per person per month).
+  - `GetById` on both throws `NotFoundException` (mapped to `404` by the existing `ExceptionHandlingMiddleware`) when the record doesn't exist *or* belongs to another user — same "don't distinguish not-found from not-yours" posture as household resources.
+  - Update/Delete were intentionally not added — out of scope for this pass, matching what the original stub controllers exposed. Add them as a follow-up if the frontend needs them.
+  - 9 new unit tests (`ExpenseServiceTests`, `BudgetServiceTests`) cover create/validate/ownership-scoping; full suite (143 tests) and solution build both pass.
+  - See `MVP_FRONTEND_BLUEPRINT.md` §Phase 7 for the client-facing API reference (this replaces that document's old "blocked" placeholder).
 - `KotoDibo.IntegrationTests` — first real integration test suite, should target meal settlement and fair-split settlement first since they're the highest-value correctness surfaces.
 - `KotoDibo.Common` — fill in as real cross-cutting needs surface from Phases 2–5, not speculatively.
 - ~~`HouseholdMembershipStatus.Invited` — token-based invitation flow~~ — **✅ Done**, shipped as a separate `HouseholdInvite` collection (code + QR, redeemed via `POST /api/invites/{code}/accept`) rather than a pending-membership-row/enum value — see `MVP_FRONTEND_BLUEPRINT.md` §1.1 for the full flow and API surface. This also introduced the backend's first CDN-backed storage integration (Cloudflare R2 via `IFileStorageService`, S3-compatible), used to host the generated invite QR PNGs.
@@ -131,13 +141,14 @@ Carried over from `BLUEPRINT.md` §12, sequenced after the two anchor features:
 ```
 Phase 1 (meal UI)  ─┐
                      ├─→ Phase 5 (frontend shell shared by both) ─→ Phase 4 (unified settlement)
-Phase 2 (fair-split  │        [see MVP_FRONTEND_BLUEPRINT.md]
-  domain) → Phase 3  ┘        [both now ✅ Done backend-side]
+Phase 2 (fair-split  │        [built in a separate frontend repo]
+  domain) → Phase 3  ┘        [Phases 1, 2, 3, 4, 5 all now ✅ Done]
   (fair-split API)
   [both now ✅ Done]
-                                                                    Phase 6 (backend gaps) — ongoing, lowest priority
+                                                                    Phase 6 (backend gaps) — Expenses/Budget ✅ Done;
+                                                                    IntegrationTests + KotoDibo.Common remain, lowest priority
 ```
 
-Phases 2→3 (fair-split) and Phase 1 (meal UI) can run in parallel — they don't share code yet. Phase 5 needs *something* from both to build against, so it trails. Phase 4 is deliberately last: it's a thin layer that only makes sense once both underlying settlements are real and tested.
+Phases 2→3 (fair-split) and Phase 1 (meal UI) ran in parallel — they don't share code. Phase 5 needed *something* from both to build against, so it trailed. Phase 4 came last: it's a thin layer that only makes sense once both underlying settlements are real and tested.
 
-Backend-side, Phases 2, 3 and 4 are now done — everything Phase 5 (frontend) needs to build against is live. Phase 1's remaining scope is UI-only (the meal engine itself was already done pre-MVP). Phase 6 stays lowest priority, unchanged.
+Backend-side, Phases 2, 3 and 4 are done. Phase 1 and Phase 5 (the UI) are also done — built in a separate frontend repository outside this backend codebase, against the API surface `MVP_FRONTEND_BLUEPRINT.md` documents. Of Phase 6's backend gaps, `Expenses`/`Budget` wiring is now done (§7); the integration test suite and speculative `KotoDibo.Common` work remain, still lowest priority.

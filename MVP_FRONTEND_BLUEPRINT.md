@@ -7,6 +7,8 @@
 > **Update (2026-09-01):** analyzed a real household's multi-month tracking spreadsheet (`House_No_289.xlsx`, 7 months of live usage) against this plan. It confirmed Phases 1–4 match real usage directly, but surfaced a mechanic the original plan didn't cover: **balances carry forward across months rather than resetting to zero** — both the shopping-fund leftover and each member's settlement position. See §0.6 and the expanded Phase 5 below. This also drove one small backend fix (`BazarPurchase.Amount` now accepts negative values, needed to record a month's leftover cash) — already shipped.
 >
 > **Update (2026-09-01, later same day):** Bill Split's `TariffMetered` method upgraded backend-side — Equal Split and Weighted Split are **unchanged**. Two things landed, both reflected in Phase 4 below: (1) it must be **displayed** as "Electricity Bill (Postpaid)" everywhere in the UI (the API's `SplitMethod` value stays `TariffMetered` — this is a label-mapping change, not an API contract change); (2) `CreateBillSplitRequest`/`UpdateBillSplitRequest` gained `FixedCharges: [{ Label, Amount }]` — constant, non-usage-based fees (demand charge, VAT, meter rent) that split **equally across active members** instead of by kWh usage, surfaced in the settlement response as `FixedChargesTotal` and per-member `FixedChargeShare`. Already shipped and tested backend-side.
+>
+> **Update (2026-09-02):** `Expenses`/`Budget` are no longer blocked — both controllers are wired backend-side. What was Phase 7 ("Deferred, do not build against") is now real Phase 7 below with the live API shape. These are **personal, per-user** endpoints (no household scoping, no `HouseholdId` — the caller only ever sees their own records), unlike every other module in this document.
 
 ---
 
@@ -346,9 +348,32 @@ Cross-cutting, layered in once Phases 0–5 work online. Highest offline value i
 
 ---
 
-## Phase 7 — Deferred (blocked on backend)
+## Phase 7 — Personal Expenses & Budget
 
-**Do not build against these yet.** `ExpensesController`/`BudgetController` are `501 Not Implemented` stubs backing non-household-scoped, unspecified entities (`Expense`/`Budget` currently have no `HouseholdId`, no lifecycle, no validators) — `MVP_BLUEPRINT.md` §7 explicitly marks this Phase 6 backend work as lowest priority and "not speculative." Revisit this section once that backend work lands with a real shape.
+Unlike every other module in this document, these two are **not household-scoped** — `Expense`/`Budget` carry no `HouseholdId`; each record belongs to the caller alone, identified from the JWT. There's no household switcher dependency here and no `HouseholdRolePolicy`/`CallerRole` gating (§0.4 doesn't apply to this module) — every endpoint just operates on "my own records." Build this as a standalone "Personal" section of the app (e.g. a per-user finance tab), not nested under the household context that Phases 1–5 share.
+
+**Screens:** Expense list (filter by date range) + Add; Expense detail; Budget list (by month) + Add; Budget detail.
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | `/api/expenses` | `CreateExpenseRequest` | `ExpenseDto` |
+| GET | `/api/expenses?from=&to=` | — | `ExpenseDto[]` |
+| GET | `/api/expenses/{id}` | — | `ExpenseDto` |
+| POST | `/api/budget` | `CreateBudgetRequest` | `BudgetDto` |
+| GET | `/api/budget` | — | `BudgetDto[]` |
+| GET | `/api/budget/{id}` | — | `BudgetDto` |
+
+`CreateExpenseRequest`: `{ Amount, Category, Description, Date }`. `ExpenseDto`: `{ Id, Amount, Category, Description, Date }`.
+`CreateBudgetRequest`: `{ Period, Amount }`. `BudgetDto`: `{ Id, Period, Amount }`.
+
+Notes:
+- `Amount` must be `> 0` on both — there's no Bazar-style negative/"leftover" mechanic here (§Phase 2's negative-amount convention is a food-cost-ledger concept only and doesn't apply to personal expenses).
+- `Category` is free text, ≤100 chars (no fixed vocabulary server-side — treat as a suggested-values combobox, same posture as Household `Type` in Phase 1). `Description` is optional-in-spirit but currently required by the DTO shape — send an empty string if the user leaves it blank; ≤500 chars.
+- `Date` cannot be in the future — same client-side pre-check as Bazar/Contributions/Meals (§Phase 2/3), server 400s on the `Date` field otherwise.
+- `Period` on a Budget must be `YYYY-MM` (e.g. `"2026-09"`) — validate the input as a month-picker, not a free date field. Creating a second budget for a `Period` the caller already has one for 400s (`errors.Period`) — treat this as "edit doesn't exist yet, only one budget per month," and disable/hide "Add budget" for a month that already has one (fetch the list first to check).
+- `GetById` on either 404s both when the record doesn't exist *and* when it belongs to someone else — same "don't distinguish not-found from not-yours" posture the household resources use (§0.3).
+- **No Edit/Cancel/Delete endpoints exist yet** — these are create + read only at MVP. Don't build edit forms against them; a mis-entered expense currently has to be lived with or manually offset by a new entry until Update/Delete ship backend-side.
+- No linkage to household ledgers (Bazar/Contributions/BillSplit) — this is a separate, personal tracking surface, not a per-household one. Don't fold its numbers into the Phase 5 household settlement dashboard.
 
 ---
 
@@ -361,7 +386,8 @@ Phase 0 (foundation & auth)
         ├─→ Phase 3 (meals)                   ├─→ Phase 5.1 (this-month snapshot) ─→ Phase 5.2 (running ledger store)
         └─→ Phase 4 (bill splits)            ─┘
                                                     Phase 6 (PWA/offline) — layer in continuously
-                                                    Phase 7 (expenses/budget) — blocked, do not start
+                                                    Phase 7 (personal expenses/budget) — standalone, no longer blocked;
+                                                    only depends on Phase 0 auth, can build any time after that
 ```
 
-Phases 2, 3, and 4 don't share components beyond the §0 foundation and the generic ledger-entry pattern (Phase 2 reused loosely for Phase 4's flat-split methods) — they can be built in parallel by different people once Phase 1 lands. Phase 5.1 is a thin aggregation view with nothing to show until 2–4 have real data flowing through them, so it's deliberately last among the "first pass" phases. Phase 5.2 (the `householdLedgerStore` running ledger from §0.6) is its own follow-on slice — it only becomes useful once at least two calendar months of real data exist, so it's reasonable to ship 5.1 for the first month of real usage and land 5.2 shortly after, rather than blocking the whole dashboard on it.
+Phases 2, 3, and 4 don't share components beyond the §0 foundation and the generic ledger-entry pattern (Phase 2 reused loosely for Phase 4's flat-split methods) — they can be built in parallel by different people once Phase 1 lands. Phase 5.1 is a thin aggregation view with nothing to show until 2–4 have real data flowing through them, so it's deliberately last among the "first pass" phases. Phase 5.2 (the `householdLedgerStore` running ledger from §0.6) is its own follow-on slice — it only becomes useful once at least two calendar months of real data exist, so it's reasonable to ship 5.1 for the first month of real usage and land 5.2 shortly after, rather than blocking the whole dashboard on it. Phase 7 doesn't depend on Phase 1's household context at all (it's per-user, not per-household) — it can be built in parallel with Phases 1–5 by whoever has spare capacity, rather than sequenced after them.

@@ -7,5 +7,9 @@ public class CreateExpenseRequestValidator : AbstractValidator<CreateExpenseRequ
 {
     public CreateExpenseRequestValidator()
     {
+        RuleFor(x => x.Amount).GreaterThan(0);
+        RuleFor(x => x.Category).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.Description).MaximumLength(500);
+        RuleFor(x => x.Date).NotEqual(default(DateOnly));
     }
 }

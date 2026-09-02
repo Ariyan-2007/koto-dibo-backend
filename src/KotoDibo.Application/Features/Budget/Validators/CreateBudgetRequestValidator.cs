@@ -7,5 +7,10 @@ public class CreateBudgetRequestValidator : AbstractValidator<CreateBudgetReques
 {
     public CreateBudgetRequestValidator()
     {
+        RuleFor(x => x.Period)
+            .NotEmpty()
+            .Matches("^\\d{4}-(0[1-9]|1[0-2])$")
+            .WithMessage("Period must be in 'YYYY-MM' format.");
+        RuleFor(x => x.Amount).GreaterThan(0);
     }
 }
