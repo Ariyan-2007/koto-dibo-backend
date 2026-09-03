@@ -9,10 +9,16 @@ using KotoDibo.Application.Features.BillSplit.Interfaces;
 using KotoDibo.Application.Features.BillSplit.Services;
 using KotoDibo.Application.Features.Budget.Interfaces;
 using KotoDibo.Application.Features.Budget.Services;
+using KotoDibo.Application.Features.BudgetDashboard.Interfaces;
+using KotoDibo.Application.Features.BudgetDashboard.Services;
 using KotoDibo.Application.Features.Contributions.Interfaces;
 using KotoDibo.Application.Features.Contributions.Services;
+using KotoDibo.Application.Features.ExpenseCategories.Interfaces;
+using KotoDibo.Application.Features.ExpenseCategories.Services;
 using KotoDibo.Application.Features.Expenses.Interfaces;
 using KotoDibo.Application.Features.Expenses.Services;
+using KotoDibo.Application.Features.RecurringExpenses.Interfaces;
+using KotoDibo.Application.Features.RecurringExpenses.Services;
 using KotoDibo.Application.Features.HouseholdBalance.Interfaces;
 using KotoDibo.Application.Features.HouseholdBalance.Services;
 using KotoDibo.Application.Features.Households.Interfaces;
@@ -56,8 +62,11 @@ public static class DependencyInjection
         services.AddScoped<IHouseholdBalanceService, HouseholdBalanceService>();
         services.AddScoped<IBillSplitService, BillSplitService>();
         services.AddScoped<ISettlementService, SettlementService>();
+        services.AddScoped<IExpenseCategoryService, ExpenseCategoryService>();
         services.AddScoped<IExpenseService, ExpenseService>();
+        services.AddScoped<IRecurringExpenseService, RecurringExpenseService>();
         services.AddScoped<IBudgetService, BudgetService>();
+        services.AddScoped<IBudgetDashboardService, BudgetDashboardService>();
 
         return services;
     }

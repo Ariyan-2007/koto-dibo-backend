@@ -18,7 +18,11 @@ public static class MongoClassMapRegistrar
             new BillSplitConfiguration(),
             new UtilityTariffConfigConfiguration(),
             new ExpenseConfiguration(),
-            new BudgetConfiguration()
+            new BudgetConfiguration(),
+            new ExpenseCategoryConfiguration(),
+            new RecurringExpenseConfiguration(),
+            new BudgetCategoryAllocationConfiguration(),
+            new BudgetAdjustmentConfiguration(),
         ];
 
         foreach (var configuration in configurations)

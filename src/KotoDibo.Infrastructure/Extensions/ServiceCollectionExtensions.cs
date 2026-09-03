@@ -3,6 +3,7 @@ using Amazon.Runtime;
 using Amazon.S3;
 using KotoDibo.Application.Common.Interfaces;
 using KotoDibo.Infrastructure.Auth;
+using KotoDibo.Infrastructure.BackgroundServices;
 using KotoDibo.Infrastructure.Common;
 using KotoDibo.Infrastructure.Email;
 using KotoDibo.Infrastructure.Persistence.MongoDb;
@@ -70,6 +71,8 @@ public static class ServiceCollectionExtensions
 
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
+
+        services.AddHostedService<RecurringExpenseGenerationHostedService>();
 
         return services;
     }

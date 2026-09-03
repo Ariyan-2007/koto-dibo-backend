@@ -17,6 +17,12 @@ public static class MongoIndexInitializer
             new DailyMealEntryIndexConfiguration(),
             new BillSplitIndexConfiguration(),
             new UtilityTariffConfigIndexConfiguration(),
+            new ExpenseCategoryIndexConfiguration(),
+            new ExpenseIndexConfiguration(),
+            new RecurringExpenseIndexConfiguration(),
+            new BudgetIndexConfiguration(),
+            new BudgetCategoryAllocationIndexConfiguration(),
+            new BudgetAdjustmentIndexConfiguration(),
         ];
 
         foreach (var configuration in configurations)

@@ -8,7 +8,7 @@
 >
 > **Update (2026-09-01, later same day):** Bill Split's `TariffMetered` method upgraded backend-side — Equal Split and Weighted Split are **unchanged**. Two things landed, both reflected in Phase 4 below: (1) it must be **displayed** as "Electricity Bill (Postpaid)" everywhere in the UI (the API's `SplitMethod` value stays `TariffMetered` — this is a label-mapping change, not an API contract change); (2) `CreateBillSplitRequest`/`UpdateBillSplitRequest` gained `FixedCharges: [{ Label, Amount }]` — constant, non-usage-based fees (demand charge, VAT, meter rent) that split **equally across active members** instead of by kWh usage, surfaced in the settlement response as `FixedChargesTotal` and per-member `FixedChargeShare`. Already shipped and tested backend-side.
 >
-> **Update (2026-09-02):** `Expenses`/`Budget` are no longer blocked — both controllers are wired backend-side. What was Phase 7 ("Deferred, do not build against") is now real Phase 7 below with the live API shape. These are **personal, per-user** endpoints (no household scoping, no `HouseholdId` — the caller only ever sees their own records), unlike every other module in this document.
+> **Update (2026-09-03):** Phase 7 was rebuilt from a two-endpoint CRUD stub into a full personal Budget & Expenses module — categories, tags, payment methods, recurring expenses, category-level budget envelopes with rollover/adjustment history, and a single dashboard endpoint that returns a complete budget-vs-actual picture in one call. **This is a breaking change** to the old `Expense`/`Budget` DTO shapes documented in the previous version of this section (`Category` is now `CategoryId`/`CategoryName`, `Period` is now `StartDate`/`EndDate`/`PeriodType`, routes moved from `/api/budget` to `/api/budgets`) — do not build against the old shapes. These remain **personal, per-user** endpoints (no household scoping, no `HouseholdId`), unlike every other module in this document.
 
 ---
 
@@ -350,30 +350,120 @@ Cross-cutting, layered in once Phases 0–5 work online. Highest offline value i
 
 ## Phase 7 — Personal Expenses & Budget
 
-Unlike every other module in this document, these two are **not household-scoped** — `Expense`/`Budget` carry no `HouseholdId`; each record belongs to the caller alone, identified from the JWT. There's no household switcher dependency here and no `HouseholdRolePolicy`/`CallerRole` gating (§0.4 doesn't apply to this module) — every endpoint just operates on "my own records." Build this as a standalone "Personal" section of the app (e.g. a per-user finance tab), not nested under the household context that Phases 1–5 share.
+Unlike every other module in this document, this whole phase is **not household-scoped** — nothing here carries a `HouseholdId`; each record belongs to the caller alone, identified from the JWT. There's no household switcher dependency and no `HouseholdRolePolicy`/`CallerRole` gating (§0.4 doesn't apply) — every endpoint just operates on "my own records." Build this as a standalone "Personal Finance" section of the app, not nested under the household context Phases 1–5 share.
 
-**Screens:** Expense list (filter by date range) + Add; Expense detail; Budget list (by month) + Add; Budget detail.
+Five sub-modules, all under `/api/expense-categories`, `/api/expenses`, `/api/recurring-expenses`, `/api/budgets`, `/api/budget-dashboard`:
+
+### 7.1 Expense categories
+
+A shared, seeded system default tree (`Housing`, `Food` → `Groceries`/`Restaurants`/`Fast Food`/`Coffee`, `Transportation` → `Fuel`/`Ride Sharing`/`Public Transport`/`Maintenance`, `Utilities`, `Healthcare`, `Education`, `Entertainment`, `Shopping`, `Travel`, `Subscriptions`, `Personal Care`, `Insurance`, `Debt Payments`, `Family`, `Other`) that every user sees, plus each user's own custom categories layered on top.
 
 | Method | Path | Request | Response |
 |---|---|---|---|
-| POST | `/api/expenses` | `CreateExpenseRequest` | `ExpenseDto` |
-| GET | `/api/expenses?from=&to=` | — | `ExpenseDto[]` |
-| GET | `/api/expenses/{id}` | — | `ExpenseDto` |
-| POST | `/api/budget` | `CreateBudgetRequest` | `BudgetDto` |
-| GET | `/api/budget` | — | `BudgetDto[]` |
-| GET | `/api/budget/{id}` | — | `BudgetDto` |
+| GET | `/api/expense-categories?includeInactive=` | — | `ExpenseCategoryDto[]` |
+| POST | `/api/expense-categories` | `CreateExpenseCategoryRequest` | `ExpenseCategoryDto` |
+| PATCH | `/api/expense-categories/{id}` | `UpdateExpenseCategoryRequest` | `ExpenseCategoryDto` |
+| DELETE | `/api/expense-categories/{id}` | — | `204` (soft — sets `IsActive: false`; the caller must own it, system defaults can't be deleted) |
 
-`CreateExpenseRequest`: `{ Amount, Category, Description, Date }`. `ExpenseDto`: `{ Id, Amount, Category, Description, Date }`.
-`CreateBudgetRequest`: `{ Period, Amount }`. `BudgetDto`: `{ Id, Period, Amount }`.
+`ExpenseCategoryDto`: `{ Id, ParentCategoryId, Name, Icon, IsSystemDefault, IsActive }` — the list comes back flat; reconstruct the parent/child tree client-side via `ParentCategoryId`. `CreateExpenseCategoryRequest`: `{ Name, ParentCategoryId?, Icon? }`. A deactivated category still resolves correctly on old expenses/budgets that reference it (they carry a `CategoryName` snapshot too), so deleting a category is always safe.
+
+### 7.2 Expenses
+
+Full CRUD with server-side filtering, sorting, and **pagination** (the first paginated list endpoint in this API — expect `{ Items, Page, PageSize, TotalCount, TotalPages }`, not a bare array).
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/api/expenses?...` | query params below | `PagedResult<ExpenseDto>` |
+| GET | `/api/expenses/{id}` | — | `ExpenseDto` |
+| POST | `/api/expenses` | `CreateExpenseRequest` | `ExpenseDto` |
+| PATCH | `/api/expenses/{id}` | `UpdateExpenseRequest` (all fields optional) | `ExpenseDto` |
+| DELETE | `/api/expenses/{id}` | — | `ExpenseDto` (soft-deleted, `Status: "Cancelled"`) |
+
+List query params: `categoryId`, `from`, `to`, `minAmount`, `maxAmount`, `merchant` (substring, case-insensitive), `paymentMethod` (`Cash`/`BankAccount`/`CreditCard`/`MobileWallet`/`Other`), `tag`, `isRecurring` (bool), `search` (matches description/merchant/category), `sortBy` (`Date`/`Amount`/`CreatedAt`/`Merchant`/`Category`, default `Date`), `sortDescending` (default `true`), `page` (default `1`), `pageSize` (default `20`, max `100`).
+
+`ExpenseDto`: `{ Id, Amount, Currency, CategoryId, CategoryName, Merchant, Description, Notes, Date, PaymentMethod, Tags[], ReceiptUrl, RecurringExpenseId, IsRecurringGenerated, Status, CreatedAt, UpdatedAt }`. `CreateExpenseRequest`: `{ Amount, Currency?, CategoryId, Merchant?, Description?, Notes?, Date, PaymentMethod?, Tags?, ReceiptUrl? }` — `Currency` defaults to `"BDT"` when omitted; `PaymentMethod` defaults to `"Cash"`.
 
 Notes:
-- `Amount` must be `> 0` on both — there's no Bazar-style negative/"leftover" mechanic here (§Phase 2's negative-amount convention is a food-cost-ledger concept only and doesn't apply to personal expenses).
-- `Category` is free text, ≤100 chars (no fixed vocabulary server-side — treat as a suggested-values combobox, same posture as Household `Type` in Phase 1). `Description` is optional-in-spirit but currently required by the DTO shape — send an empty string if the user leaves it blank; ≤500 chars.
-- `Date` cannot be in the future — same client-side pre-check as Bazar/Contributions/Meals (§Phase 2/3), server 400s on the `Date` field otherwise.
-- `Period` on a Budget must be `YYYY-MM` (e.g. `"2026-09"`) — validate the input as a month-picker, not a free date field. Creating a second budget for a `Period` the caller already has one for 400s (`errors.Period`) — treat this as "edit doesn't exist yet, only one budget per month," and disable/hide "Add budget" for a month that already has one (fetch the list first to check).
-- `GetById` on either 404s both when the record doesn't exist *and* when it belongs to someone else — same "don't distinguish not-found from not-yours" posture the household resources use (§0.3).
-- **No Edit/Cancel/Delete endpoints exist yet** — these are create + read only at MVP. Don't build edit forms against them; a mis-entered expense currently has to be lived with or manually offset by a new entry until Update/Delete ship backend-side.
-- No linkage to household ledgers (Bazar/Contributions/BillSplit) — this is a separate, personal tracking surface, not a per-household one. Don't fold its numbers into the Phase 5 household settlement dashboard.
+- `Amount` must be `> 0`; `Date` cannot be in the future (same posture as every other ledger in this app).
+- `CategoryId` is required and validated against the caller's visible categories (system defaults + their own) — there's no uncategorized-expense concept at MVP.
+- `Tags` are free-text, deduplicated case-insensitively server-side, max 20 per expense, ≤50 chars each.
+- Edit/delete both 404 the same way as everywhere else when the expense doesn't exist or belongs to someone else; editing/deleting an already-deleted expense 400s.
+
+### 7.3 Recurring expenses
+
+A template a background sweep (every 30 min server-side) turns into real `Expense` rows as they come due — generation is idempotent, so a client-triggered catch-up never double-creates.
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/api/recurring-expenses?includeInactive=` | — | `RecurringExpenseDto[]` |
+| GET | `/api/recurring-expenses/{id}` | — | `RecurringExpenseDto` |
+| POST | `/api/recurring-expenses` | `CreateRecurringExpenseRequest` | `RecurringExpenseDto` |
+| PATCH | `/api/recurring-expenses/{id}` | `UpdateRecurringExpenseRequest` | `RecurringExpenseDto` |
+| POST | `/api/recurring-expenses/{id}/deactivate` | — | `RecurringExpenseDto` |
+| POST | `/api/recurring-expenses/generate-due` | — | `ExpenseDto[]` (newly materialized occurrences, if any) |
+
+`CreateRecurringExpenseRequest`: `{ Amount, Currency?, CategoryId, Merchant?, Description?, Notes?, PaymentMethod?, Tags?, Frequency, StartDate, EndDate? }` — `Frequency` is one of `Daily`/`Weekly`/`Biweekly`/`Monthly`/`Quarterly`/`Yearly`. `RecurringExpenseDto` additionally exposes `NextOccurrenceDate` and `LastGeneratedDate` — useful for a "next charge" chip on the recurring-expenses list without waiting on the dashboard. Frequency and StartDate are immutable after creation (deactivate and create a new one to change cadence); everything else is PATCH-able.
+
+### 7.4 Budgets
+
+A `Budget` is one period's envelope (e.g. "January 2026"), not a single ongoing record — create a new one each month/week/year. Each carries zero or more `BudgetCategoryAllocation` "envelopes," and every planned/spent/remaining/variance/usage% number is computed live from the caller's `Expense` records within that budget's date range — nothing here is a stale cached total.
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/api/budgets?status=&from=&to=` | — | `BudgetSummaryDto[]` |
+| GET | `/api/budgets/{id}` | — | `BudgetDto` (full, with per-category breakdown) |
+| POST | `/api/budgets` | `CreateBudgetRequest` | `BudgetDto` |
+| PATCH | `/api/budgets/{id}` | `UpdateBudgetRequest` | `BudgetDto` |
+| POST | `/api/budgets/{id}/categories` | `AddBudgetCategoryRequest` | `BudgetDto` |
+| POST | `/api/budgets/{id}/categories/{allocationId}/adjust` | `AdjustBudgetCategoryRequest` | `BudgetDto` |
+| POST | `/api/budgets/{id}/categories/{allocationId}/transfer` | `TransferBudgetCategoryRequest` | `BudgetDto` |
+| GET | `/api/budgets/{id}/categories/{allocationId}/adjustments` | — | `BudgetAdjustmentDto[]` (full history, newest first) |
+| POST | `/api/budgets/{id}/rollover` | `RolloverBudgetRequest` | `BudgetDto` (the new, next-period budget) |
+
+`CreateBudgetRequest`: `{ Name, Description?, Currency?, PeriodType, StartDate, EndDate?, Notes?, Categories?: [{ CategoryId, PlannedAmount, RolloverEnabled, Notes? }] }` — `PeriodType` is `Weekly`/`Monthly`/`Yearly`/`Custom`; `EndDate` is auto-derived from `StartDate` for the first three and **required** for `Custom`. New budgets start in `Draft` status.
+
+`BudgetDto`: `{ Id, Name, Description, Currency, PeriodType, StartDate, EndDate, Status, Notes, TotalPlanned, TotalRollover, TotalAvailable, TotalSpent, TotalRemaining, TotalOverspent, UtilizationPercentage, Health, Categories: BudgetCategoryDto[], CreatedAt, UpdatedAt }`. Each `BudgetCategoryDto`: `{ Id, CategoryId, CategoryName, PlannedAmount, RolloverEnabled, RolloverAmount, TotalAvailable, Spent, Remaining, Variance, UsagePercentage, Status, Notes }` — `Status` is one of `NoBudget`/`OnTrack`/`Warning`/`Overspent`; the budget-level `Health` is one of `NoBudget`/`Healthy`/`Warning`/`Overspending`/`Critical`. `UsagePercentage`/`UtilizationPercentage` are `null` (not `0`) when nothing was ever allocated — render "—" rather than "0%".
+
+`Status` transitions are enforced server-side: `Draft → Active|Archived`, `Active → Completed|Archived`, `Completed → Archived`, and `Archived` is terminal — gate the status dropdown accordingly rather than discovering the 400 at submit time. An `Archived` budget also rejects any category add/adjust/transfer call.
+
+`AdjustBudgetCategoryRequest`: `{ Delta, Reason? }` — a signed delta (positive = increase, negative = decrease) against the category's `PlannedAmount`, not an absolute new value; every adjustment is appended to that category's history rather than silently overwriting it. `TransferBudgetCategoryRequest`: `{ ToCategoryAllocationId, Amount, Reason? }` — moves `Amount` from the URL's category into another category in the same budget (both legs show up in each side's adjustment history as `TransferOut`/`TransferIn`).
+
+`RolloverBudgetRequest`: `{ Name?, StartDate?, EndDate? }` (all optional — omitted, the next period is auto-computed from the current budget's `PeriodType`) creates the next period's budget, copying every category's base `PlannedAmount` forward and, for categories with `RolloverEnabled: true`, carrying that category's current `Remaining` (which **can be negative** — an overspent envelope's deficit follows into the next period rather than vanishing) into the new period's `RolloverAmount`. Categories with `RolloverEnabled: false` roll the base amount forward with `RolloverAmount: 0`.
+
+### 7.5 Dashboard — the main entry point
+
+One call returns everything a personal finance dashboard screen needs — no client-side sum/percentage/variance math required.
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/api/budget-dashboard?preset=&from=&to=&budgetId=&currency=&comparisonPeriod=` | `DashboardResponse` |
+
+Query params (all optional): `preset` (`Today`/`ThisWeek`/`ThisMonth`/`LastMonth`/`ThisYear`/`Custom`, default `ThisMonth`) is overridden by explicit `from`/`to` if either is given; `budgetId` pins the `budget`/`categoryBreakdown` sections to one specific budget instead of whichever one overlaps the resolved period; `currency` filters expenses to one currency; `comparisonPeriod` (`None`/`PreviousPeriod`/`SamePeriodLastYear`, default `PreviousPeriod`) controls the `comparison` section.
+
+`DashboardResponse` shape:
+```
+{
+  period: { from, to, preset },
+  summary: { totalBudget, totalAllocated, totalSpent, totalRemaining, totalOverspent, budgetUtilizationPercentage, expenseCount, averageExpense },
+  budget: { hasBudget, id, name, status, health },
+  expenses: { count, totalAmount, averageAmount, recentExpenses: ExpenseDto[] },  // last 5
+  budgetVsActual: [{ label, budget, actual }],       // one point per calendar month the range touches
+  categoryBreakdown: [{ categoryId, categoryName, budget, spent, remaining, variance, utilizationPercentage, status, percentageOfTotalSpending }],
+  spendingTrend: [{ date, amount }],                 // daily (<=31d span), weekly (<=182d), else monthly buckets
+  topCategories: [{ categoryId, categoryName, amount, percentageOfTotal }],   // top 10
+  topMerchants: [{ merchant, amount, transactionCount, percentageOfTotal }], // top 10
+  overspending: [ ...same shape as categoryBreakdown, filtered to status "Overspent" ],
+  upcomingExpenses: [{ recurringExpenseId, description, merchant, categoryName, amount, nextOccurrenceDate, daysUntilDue }], // next 30 days, max 10
+  comparison: { previousFrom, previousTo, currentSpending, previousSpending, spendingChange, spendingChangePercentage, currentBudget, previousBudget, budgetChange, budgetChangePercentage, trend } | null,
+  insights: { highestSpendingCategory, mostFrequentCategory, highestExpenseAmount, highestExpenseDescription, averageExpense, overspendingCategoriesCount, categoriesApproachingLimit: string[], categoriesSignificantlyUnderBudget: string[], recurringExpensesTotal, fixedExpensesTotal, variableExpensesTotal },
+}
+```
+
+Notes:
+- Every section respects the **same resolved `[from, to]` window** — there's no hidden second date range. If you query "This Week," `categoryBreakdown` shows this week's spend against the matched budget's envelope totals (a week-to-date progress bar against a monthly target — the standard pattern, not a bug).
+- `budget.hasBudget: false` (no budget overlaps the period, or none exists yet) is a normal response, not an error — render an empty/"set up a budget" state rather than treating it as a failure. Same for zero expenses: every numeric field comes back as `0`, never `null`, except percentage fields which are `null` specifically when nothing was ever budgeted (`totalAvailable == 0`).
+- `comparison` is `null` only when `comparisonPeriod=None` was explicitly requested.
+- `trend` is `"Increased"`/`"Decreased"`/`"Stable"` — a swing within ±2% reads as `"Stable"` rather than a false-positive trend arrow.
 
 ---
 
