@@ -1,4 +1,5 @@
 using KotoDibo.Domain.Entities;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace KotoDibo.Infrastructure.Persistence.MongoDb.Indexes;
@@ -30,7 +31,10 @@ public class ExpenseIndexConfiguration : IMongoIndexConfiguration
                 {
                     Name = "ux_expense_recurringexpenseid_date",
                     Unique = true,
-                    PartialFilterExpression = Builders<Expense>.Filter.Ne(e => e.RecurringExpenseId, null),
+                    // $ne/$not are rejected by MongoDB in partial index filters, and RecurringExpenseId is
+                    // serialized as a literal null (not omitted) when unset, so $exists alone would still
+                    // match those documents. $type excludes both missing and literal-null values.
+                    PartialFilterExpression = Builders<Expense>.Filter.Type(e => e.RecurringExpenseId, BsonType.String),
                 }),
         ];
 
