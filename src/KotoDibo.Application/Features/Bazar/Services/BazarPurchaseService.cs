@@ -202,29 +202,28 @@ public class BazarPurchaseService : IBazarPurchaseService
         }, cancellationToken);
     }
 
-    public async Task<BazarPurchaseDto> CancelAsync(string householdId, string callerUserId, string purchaseId, CancellationToken cancellationToken = default)
+    // A hard delete, not a soft-cancel: removing a Bazar purchase permanently wipes it (and its
+    // mirrored Contribution, if any) from the database. There's no undo and no "Cancelled" row left
+    // behind — the household's financial history for this purchase simply no longer includes it.
+    public async Task DeleteAsync(string householdId, string callerUserId, string purchaseId, CancellationToken cancellationToken = default)
     {
         var membership = await _access.RequireMembershipAsync(householdId, callerUserId, HouseholdPermission.ViewBazar, cancellationToken);
         var purchase = await GetOwnedPurchaseAsync(householdId, purchaseId, cancellationToken);
 
-        RequireEditAccess(membership.Role, purchase.PurchasedByUserId, callerUserId, HouseholdPermission.CancelBazarPurchase, "Bazar purchase");
-        RequireActive(purchase);
+        RequireEditAccess(membership.Role, purchase.PurchasedByUserId, callerUserId, HouseholdPermission.DeleteBazarPurchase, "Bazar purchase");
 
-        purchase.Status = FinancialEntryStatus.Cancelled;
-        purchase.UpdatedAt = _dateTimeProvider.UtcNow;
-
-        return await _unitOfWork.ExecuteAsync(async ct =>
+        await _unitOfWork.ExecuteAsync(async ct =>
         {
-            // The mirrored Contribution only exists because this purchase does — once the purchase
-            // is cancelled, the household never actually received that money, so the mirror must
-            // go too, in the same transaction so neither can end up cancelled without the other.
+            // The mirrored Contribution only exists because this purchase does — deleting the
+            // purchase must delete the mirror with it, in the same transaction, so neither can be
+            // left behind without the other.
             if (purchase.LinkedContributionId is not null)
             {
-                await CancelLinkedContributionAsync(purchase.LinkedContributionId, ct);
+                await _contributions.DeleteAsync(purchase.LinkedContributionId, ct);
             }
 
-            await _purchases.UpdateAsync(purchase, ct);
-            return ToDto(purchase);
+            await _purchases.DeleteAsync(purchase.Id, ct);
+            return true;
         }, cancellationToken);
     }
 
@@ -264,8 +263,9 @@ public class BazarPurchaseService : IBazarPurchaseService
 
     // Brings the mirrored Contribution in line with the purchase's post-edit state: creates one if
     // the purchase newly qualifies (e.g. switched to Personal, or a leftover amount became
-    // positive), updates it in place if it already exists, or cancels it if the purchase no longer
-    // qualifies (e.g. switched to HouseholdFund).
+    // positive), updates it in place if it already exists, or deletes it outright if the purchase no
+    // longer qualifies (e.g. switched to HouseholdFund) — there's no "cancelled mirror" state to
+    // leave behind, it just stops existing.
     private async Task ReconcileLinkedContributionAsync(BazarPurchase purchase, string? oldLinkedContributionId, CancellationToken cancellationToken)
     {
         var shouldHaveContribution = purchase.FundingSource == BazarFundingSource.Personal && purchase.Amount > 0;
@@ -274,7 +274,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         {
             if (oldLinkedContributionId is not null)
             {
-                await CancelLinkedContributionAsync(oldLinkedContributionId, cancellationToken);
+                await _contributions.DeleteAsync(oldLinkedContributionId, cancellationToken);
                 purchase.LinkedContributionId = null;
             }
 
@@ -284,7 +284,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         if (oldLinkedContributionId is not null)
         {
             var existing = await _contributions.GetByIdAsync(oldLinkedContributionId, cancellationToken);
-            if (existing is not null && existing.Status == FinancialEntryStatus.Active)
+            if (existing is not null)
             {
                 existing.ContributedByUserId = purchase.PurchasedByUserId;
                 existing.CreatedByUserId = purchase.CreatedByUserId;
@@ -300,19 +300,6 @@ public class BazarPurchaseService : IBazarPurchaseService
 
         var created = await CreateLinkedContributionAsync(purchase, _dateTimeProvider.UtcNow, cancellationToken);
         purchase.LinkedContributionId = created.Id;
-    }
-
-    private async Task CancelLinkedContributionAsync(string contributionId, CancellationToken cancellationToken)
-    {
-        var contribution = await _contributions.GetByIdAsync(contributionId, cancellationToken);
-        if (contribution is null || contribution.Status != FinancialEntryStatus.Active)
-        {
-            return;
-        }
-
-        contribution.Status = FinancialEntryStatus.Cancelled;
-        contribution.UpdatedAt = _dateTimeProvider.UtcNow;
-        await _contributions.UpdateAsync(contribution, cancellationToken);
     }
 
     private static BazarFundingSource ParseFundingSource(string value) => Enum.Parse<BazarFundingSource>(value, ignoreCase: true);

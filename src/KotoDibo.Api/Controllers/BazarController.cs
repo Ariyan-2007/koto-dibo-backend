@@ -55,11 +55,13 @@ public class BazarController : ControllerBase
         return Ok(purchase);
     }
 
-    [HttpPost("{purchaseId}/cancel")]
-    public async Task<ActionResult<BazarPurchaseDto>> Cancel(string householdId, string purchaseId, CancellationToken cancellationToken)
+    // Hard delete — permanently removes this purchase (and its mirrored Contribution, if any).
+    // No soft-cancel state: there's nothing left in the database to undo this with.
+    [HttpDelete("{purchaseId}")]
+    public async Task<IActionResult> Delete(string householdId, string purchaseId, CancellationToken cancellationToken)
     {
-        var purchase = await _bazarPurchaseService.CancelAsync(householdId, UserId, purchaseId, cancellationToken);
-        return Ok(purchase);
+        await _bazarPurchaseService.DeleteAsync(householdId, UserId, purchaseId, cancellationToken);
+        return NoContent();
     }
 
     private string UserId => _currentUserService.UserId!;

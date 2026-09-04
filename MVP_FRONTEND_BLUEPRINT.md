@@ -14,8 +14,15 @@
 > - **`FundingSource` on every Bazar purchase** (`Personal` — paid out of pocket, the default — or `HouseholdFund` — drawn from the shared pool) now drives real accounting: a `Personal` purchase auto-creates a linked `Contribution` for the same amount (so the buyer gets credited) and the two net to **zero** balance impact together; a `HouseholdFund` purchase draws the pool down directly and is rejected with a domain error if funds are insufficient.
 > - **Contributions gained an on-behalf-of flow**, mirroring Bazar's existing one: `POST .../contributions/{userId}`, Owner/Manager only.
 > - **`CreatedByUserId` is new on both `BazarPurchaseDto` and `ContributionDto`** — the record's actual submitter, kept separate from the financial owner (`PurchasedByUserId`/`ContributedByUserId`). Populate it wherever you currently show "recorded by," and show it distinctly from the owner whenever they differ (on-behalf-of, or an auto-generated mirror).
-> - **A Contribution auto-generated from a Bazar purchase (`SourceType: "AutoFromBazar"`) can no longer be edited or cancelled directly** — the API 400s; the frontend must hide Edit/Delete for these rows entirely and point the user at the originating Bazar purchase instead (`SourceBazarPurchaseId`).
+> - **A Contribution auto-generated from a Bazar purchase (`SourceType: "AutoFromBazar"`) can no longer be edited or deleted directly** — the API 400s; the frontend must hide Edit/Delete for these rows entirely and point the user at the originating Bazar purchase instead (`SourceBazarPurchaseId`).
 > - **New unified ledger endpoint**: `GET .../balance/transactions` returns Bazar + Contribution rows merged into one chronological feed with a `BalanceImpact` field per row that sums exactly to `CurrentBalance` — use it instead of merging the Bazar and Contribution lists yourself.
+>
+> **Update (2026-09-04, later same day): removal is now a hard delete, not a soft-cancel — breaking change to the remove flow.** Bazar and Contribution records are no longer kept around after removal; there's no audit trail requirement for these two ledgers, so "remove" now permanently wipes the row from the database instead of flipping it to `Status: "Cancelled"`. Concretely:
+> - **`POST .../bazar/{purchaseId}/cancel` and `POST .../contributions/{contributionId}/cancel` are gone.** Replaced by `DELETE .../bazar/{purchaseId}` and `DELETE .../contributions/{contributionId}` — standard REST delete, `204 No Content` on success, no response body (there's no updated-to-Cancelled DTO to return, because nothing is left afterward). Update every "Cancel" button/call in the Bazar and Contribution screens to call these instead.
+> - **This is irreversible.** Strengthen the confirmation copy accordingly — this used to be a safe, reversible action ("Cancelled" rows stayed visible, struck-through, forever); it no longer is. Use language like *"Permanently delete this [Bazar purchase / contribution]? This cannot be undone."*, not the old, softer "cancel" framing.
+> - **Deleted rows vanish from every list/history/ledger view immediately** — they won't come back filtered-out by a `status` toggle, because there's no row left to filter. Remove any "show cancelled" toggle/filter UI for Bazar and Contributions specifically (the `status` query param and struck-through row treatment described below still apply to Bill Split, which is unaffected by this change and keeps its own soft-cancel behavior).
+> - **Note for historical data:** any row that was soft-cancelled *before* this change shipped may still exist with `Status: "Cancelled"` and will still appear (struck-through) until someone actually deletes it — the backend did not retroactively purge those. Once deleted (by anyone with permission, regardless of its current `Status`), it's gone the same as any other row.
+> - **Cascade behavior is unchanged, just harder now:** deleting a `Personal`-funded Bazar purchase still removes its linked Contribution automatically and atomically — it's just a real delete of both rows instead of cancelling both. The linked-Contribution-immutability rule (§2.2.1) is also unchanged: a Contribution with `SourceType: "AutoFromBazar"` still can't be deleted directly (still 400s — updated message: *"Edit or delete that Bazar purchase instead."*) — only its originating Bazar purchase's delete can remove it.
 
 ---
 
@@ -55,12 +62,12 @@ Mirror `HouseholdRolePolicy` so the UI never offers an action the API will rejec
 | View lists / settlements | ✅ | ✅ | ✅ | ✅ |
 | Add own entry | ✅ | ✅ | ✅ | ❌ |
 | Add entry **on behalf of another member** (Bazar, Contributions) | ✅ | ✅ | ❌ | ❌ |
-| Edit/cancel **own** entry | ✅ | ✅ | ✅ | ❌ |
-| Edit/cancel **anyone's** entry | ✅ | ✅ | ❌ | ❌ |
+| Edit/remove **own** entry | ✅ | ✅ | ✅ | ❌ |
+| Edit/remove **anyone's** entry | ✅ | ✅ | ❌ | ❌ |
 | Record meal count for **another** member | ✅ | ✅ | ❌ | ❌ |
 | Household settings, members, roles | ✅ | ✅ (can't touch Owner/Manager removal) | ❌ | ❌ |
 
-Encode this once as a shared helper (`canEdit(role, ownerId, currentUserId)`), reused by every module below instead of re-deriving it per screen.
+The *who's allowed* shape above is uniform, but *what removal does* is not: for Bazar and Contributions, "remove" is a permanent `DELETE` (§2.1/§2.2); for Bill Split and Meals it's still a soft `.../cancel`. Encode the permission check once as a shared helper (`canEdit(role, ownerId, currentUserId)`), reused by every module below instead of re-deriving it per screen — but don't share the *action* itself (delete vs. cancel) across modules.
 
 ### 0.5 Known API gaps to design around
 Two real gaps surfaced while building the backend that the frontend has to work around (or that should feed back into a future backend ticket):
@@ -170,7 +177,7 @@ Three tightly-linked pieces, not two independent CRUD ledgers: **Bazar** (money 
 
 > A Bazar purchase paid **"from my pocket"** (`FundingSource: "Personal"`) is *not* just an expense — it's simultaneously a `Contribution`, auto-created and linked to it, crediting the buyer for fronting the money. That pair always nets to **zero** balance impact. A Bazar purchase paid **"from household"** (`FundingSource: "HouseholdFund"`) is a pure draw on the pool — no Contribution is created, and it's rejected if the pool can't cover it.
 
-**Screens:** Bazar list (filter by date range / status) + Add/Edit/Cancel, with a **payment-source selector** ("Pay from my pocket" vs "Pay from household") and an on-behalf-of member picker for Owner/Manager; Contributions list + Add/Edit/Cancel, with its own on-behalf-of picker ("For User") for Owner/Manager; a Household Balance/Ledger screen (see §2.3) showing the current pool total and a unified transaction history.
+**Screens:** Bazar list (filter by date range / status) + Add/Edit/**Delete** (permanent — see the 2026-09-04 changelog note above), with a **payment-source selector** ("Pay from my pocket" vs "Pay from household") and an on-behalf-of member picker for Owner/Manager; Contributions list + Add/Edit/**Delete** (same permanence), with its own on-behalf-of picker ("For User") for Owner/Manager; a Household Balance/Ledger screen (see §2.3) showing the current pool total and a unified transaction history.
 
 ### 2.1 Bazar
 
@@ -181,7 +188,7 @@ Three tightly-linked pieces, not two independent CRUD ledgers: **Bazar** (money 
 | GET | `/api/households/{householdId}/bazar?from=&to=&status=` | any active member | — | `BazarPurchaseDto[]` |
 | GET | `/api/households/{householdId}/bazar/{purchaseId}` | any active member | — | `BazarPurchaseDto` |
 | PATCH | `/api/households/{householdId}/bazar/{purchaseId}` | owner of the entry, or Owner/Manager | `UpdateBazarPurchaseRequest` | `BazarPurchaseDto` |
-| POST | `/api/households/{householdId}/bazar/{purchaseId}/cancel` | owner of the entry, or Owner/Manager | — | `BazarPurchaseDto` |
+| DELETE | `/api/households/{householdId}/bazar/{purchaseId}` | owner of the entry, or Owner/Manager | — | `204`, no body |
 
 `CreateBazarPurchaseRequest`: `{ Date, Amount, Currency, Note?, FundingSource? }`. `UpdateBazarPurchaseRequest` (PATCH, partial): `{ Date?, Amount?, Currency?, Note?, FundingSource? }`.
 
@@ -202,7 +209,7 @@ Three tightly-linked pieces, not two independent CRUD ledgers: **Bazar** (money 
 | GET | `/api/households/{householdId}/contributions?from=&to=&status=` | any active member | — | `ContributionDto[]` |
 | GET | `/api/households/{householdId}/contributions/{contributionId}` | any active member | — | `ContributionDto` |
 | PATCH | `/api/households/{householdId}/contributions/{contributionId}` | owner of the entry, or Owner/Manager — **manual entries only, see below** | `UpdateContributionRequest` | `ContributionDto` |
-| POST | `/api/households/{householdId}/contributions/{contributionId}/cancel` | owner of the entry, or Owner/Manager — **manual entries only, see below** | — | `ContributionDto` |
+| DELETE | `/api/households/{householdId}/contributions/{contributionId}` | owner of the entry, or Owner/Manager — **manual entries only, see below** | — | `204`, no body |
 
 `CreateContributionRequest`: `{ Date, Amount, Currency, Notes? }` (`Amount` must be `> 0` — Contributions have no negative/leftover concept, that's Bazar-only, §2.4). `UpdateContributionRequest` (PATCH, partial): `{ Date?, Amount?, Currency?, Notes? }`.
 
@@ -210,14 +217,14 @@ Three tightly-linked pieces, not two independent CRUD ledgers: **Bazar** (money 
 - `ContributedByUserId` / `CreatedByUserId` — same owner-vs-creator split as Bazar above, and the same on-behalf-of mechanics via `POST .../contributions/{userId}` (**new** — this didn't exist before; it now mirrors Bazar's).
 - `SourceType`: `"Manual"` (a member deposited cash directly — the normal case) or `"AutoFromBazar"` (auto-generated by a `Personal`-funded Bazar purchase — see §2.1). `SourceBazarPurchaseId` is set only for the latter.
 
-**§2.2.1 Linked-Contribution immutability — enforce this in the UI, not just the API.** A Contribution with `SourceType: "AutoFromBazar"` is a *derived* record: its lifecycle belongs to the Bazar purchase that created it, not to the Contribution endpoints. `PATCH` and `.../cancel` on one of these both return:
+**§2.2.1 Linked-Contribution immutability — enforce this in the UI, not just the API.** A Contribution with `SourceType: "AutoFromBazar"` is a *derived* record: its lifecycle belongs to the Bazar purchase that created it, not to the Contribution endpoints. `PATCH` and `DELETE` on one of these both return:
 ```
-{ "status": 400, "title": "This contribution was auto-generated from a Bazar purchase. Edit or cancel that Bazar purchase instead.", "errors": null }
+{ "status": 400, "title": "This contribution was auto-generated from a Bazar purchase. Edit or delete that Bazar purchase instead.", "errors": null }
 ```
 The backend enforces this regardless of what the frontend does, but **don't rely on that** — a user hitting a 400 on a button they could see is a broken-feeling UI. For any Contribution row where `SourceType === "AutoFromBazar"`:
-- Hide the Edit and Delete/Cancel actions entirely.
+- Hide the Edit and Delete actions entirely.
 - Show explanatory copy instead, e.g. *"Generated from a Bazar expense. To change or remove it, edit or delete the associated Bazar purchase."* — and link `SourceBazarPurchaseId` to that purchase's detail view.
-- The Bazar purchase's own edit/delete flow **is** the way to change this Contribution: editing the purchase's `Amount` reconciles the linked Contribution's amount in place (same id, no duplicate — see the worked example in §2.4), and cancelling the purchase cascade-cancels the linked Contribution automatically. Both happen atomically server-side.
+- The Bazar purchase's own edit/delete flow **is** the way to change this Contribution: editing the purchase's `Amount` reconciles the linked Contribution's amount in place (same id, no duplicate — see the worked example in §2.4), and **deleting** the purchase permanently deletes the linked Contribution with it. Both happen atomically server-side.
 
 ### 2.3 Household Balance / Ledger
 
@@ -233,15 +240,15 @@ The backend enforces this regardless of what the frontend does, but **don't rely
 - **`BalanceImpact` is the field to sum, not `Amount`.** It's each row's actual signed effect on `CurrentBalance`: `+Amount` for every active Contribution; `-Amount` for an active Bazar purchase only when it's `HouseholdFund`-funded *or* has a `LinkedEntryId` (a `Personal` purchase with no mirror — i.e. a negative leftover entry, §2.4 — carries `0`, since it never had an offsetting Contribution in the first place). Summing every row's `BalanceImpact` always equals `HouseholdBalanceDto.CurrentBalance` for the same `status` filter — use this as a client-side consistency check if useful, it should never mismatch.
 - `UserId` is the financial owner (`PurchasedByUserId`/`ContributedByUserId`); `CreatedByUserId` the actual submitter — same distinction as §2.1/§2.2.
 - `SourceType` is `FundingSource` for a `BazarPurchase` row or `SourceType` for a `Contribution` row (the same string values as their own DTOs above). `LinkedEntryId` is the counterpart record's id — a `Personal` purchase's mirrored Contribution, or an `AutoFromBazar` Contribution's originating purchase — `null` otherwise; use it to let a user click from one half of a linked pair to the other.
-- `status` defaults to returning both `Active` and `Cancelled` rows when omitted (matching the Bazar/Contribution list endpoints); pass `status=Active` to match what `HouseholdBalanceDto` itself reflects.
+- `status` filters against whatever `Active`/`Cancelled` rows still exist (see below — going forward, deletion means there's usually nothing `Cancelled` left to filter for); omit it to get both.
 
-**Worked example — personal-pocket Bazar, end to end** (drives the ledger screen's design): Ariyan contributes ৳5,000 manually. Balance: 5,000. He then buys ৳1,000 of groceries "from his pocket." Two things happen atomically: the purchase is recorded (`FundingSource: "Personal"`), and a `Contribution` for ৳1,000 is auto-created and linked (`LinkedContributionId` ↔ `SourceBazarPurchaseId`). Balance stays exactly **5,000** — the ledger feed shows +1,000 (the mirrored Contribution) and −1,000 (the purchase itself) as two separate rows that net to zero, not one row with a confusing zero amount. If he then edits that purchase's amount to ৳1,500, the linked Contribution updates to ৳1,500 **in place** (same id — never a second Contribution row), and the balance is still unaffected. If he cancels the purchase, the linked Contribution cascade-cancels with it, and both drop out of the active balance together. Meanwhile, if Waythin pays ৳1,500 of groceries "from household," that draws the pool directly: no Contribution is created, and the balance decreases by exactly 1,500 (rejected up front with a domain error if the pool can't cover it).
+**Worked example — personal-pocket Bazar, end to end** (drives the ledger screen's design): Ariyan contributes ৳5,000 manually. Balance: 5,000. He then buys ৳1,000 of groceries "from his pocket." Two things happen atomically: the purchase is recorded (`FundingSource: "Personal"`), and a `Contribution` for ৳1,000 is auto-created and linked (`LinkedContributionId` ↔ `SourceBazarPurchaseId`). Balance stays exactly **5,000** — the ledger feed shows +1,000 (the mirrored Contribution) and −1,000 (the purchase itself) as two separate rows that net to zero, not one row with a confusing zero amount. If he then edits that purchase's amount to ৳1,500, the linked Contribution updates to ৳1,500 **in place** (same id — never a second Contribution row), and the balance is still unaffected. If he **deletes** the purchase, the linked Contribution is permanently deleted with it, and both rows disappear from the ledger entirely (not struck-through — gone). Meanwhile, if Waythin pays ৳1,500 of groceries "from household," that draws the pool directly: no Contribution is created, and the balance decreases by exactly 1,500 (rejected up front with a domain error if the pool can't cover it).
 
 Notes (all three sub-sections above):
 - `Date` cannot be in the future (validate client-side before submit; server 400s on `date` field otherwise). `Currency` is a free 3-letter code validated as `^[A-Za-z]{3}$` — default the field to a constant (e.g. `"BDT"`) with the option to override, since there's no household-level base-currency setting yet.
-- `status` filter query param takes the literal enum string (`Active`/`Cancelled`); omit it to get both.
-- Cancelled entries are **soft-deleted, never removed** — list/ledger endpoints return them too (unless filtered out), so render them struck-through/greyed rather than expecting them to disappear.
-- Edit/Cancel buttons on a Bazar or (manual) Contribution row: gate per §0.4 — a Member only sees them on their own entries; Owner/Manager see them on all. This is layered *underneath* the §2.2.1 linked-Contribution rule — an auto-generated Contribution gets no Edit/Cancel affordance for anyone, including its own Owner/Manager.
+- **Removing a Bazar purchase or Contribution is a permanent hard delete (`DELETE`, `204`), not a soft-cancel — see the 2026-09-04 changelog note at the top of this document.** There's no `Status: "Cancelled"` state for new removals to land in; the row is simply gone from every list/ledger response afterward. Build the "Delete" action with irreversible-action UX (strong confirm copy, no "restore" affordance) — this is a real behavior difference from the rest of this document's Edit/Cancel pattern (Bill Split, Meals, etc. are unaffected and keep soft-cancel).
+- A pre-existing row with `Status: "Cancelled"` (from before this change, or from a still-soft-cancel module like Bill Split) is **soft-deleted** — struck-through/greyed in list views rather than hidden, since the record still exists and is returned by list/ledger endpoints unless filtered out via `status=Active`. Don't conflate this with the new hard-delete flow: a Cancelled Bazar/Contribution row can still be deleted (permanently) like any other row, at which point it's gone rather than merely struck-through.
+- Edit/Delete buttons on a Bazar or (manual) Contribution row: gate per §0.4 — a Member only sees them on their own entries; Owner/Manager see them on all. This is layered *underneath* the §2.2.1 linked-Contribution rule — an auto-generated Contribution gets no Edit/Delete affordance for anyone, including its own Owner/Manager.
 - The on-behalf-of picker (Bazar and Contributions both) should only render for callers whose cached `CallerRole` (§0.2) is `Owner` or `Manager` — mirrors the existing §0.4 gating pattern, just against a new pair of actions.
 
 ### 2.4 Bazar's negative-amount "leftover" entry
@@ -330,7 +337,7 @@ Notes:
 - The band table is the "why did this cost so much" visualization for the metered portion — for each band show rate, total units consumed, and the attributed-vs-shared split within that band (a stacked bar or the reference repo's "flip card" pattern both work). The most expensive bands get attributed to metered usage first — expect (and design for) most/all of the top band's cost landing on `AttributedCost`, with only the cheapest band's leftover typically falling into `SharedCost`. **Show `FixedChargesTotal` as a separate line beneath the band table, itemized by `FixedCharges[*].Label`** — don't fold it into the band visualization, since it isn't usage-based and would misleadingly suggest it's part of the kWh cost.
 - **Create/edit form for Electricity Bill (Postpaid):** after the sub-meter reading inputs, offer a repeatable "Add a fee" row (label text + amount) for `FixedCharges` — common presets worth offering as quick-add chips: "Demand Charge," "VAT," "Meter Rent" — but keep the field freeform since utility line items vary by provider. Each row needs both a non-empty label and a positive amount before it's included; an empty list is valid (not every bill has extra fees).
 - Only `"BD"` is seeded as a valid `TariffCountry` at MVP (§0.5.2) — hardcode it as the only option, don't build a country picker yet.
-- Ownership/edit rules match Phase 2 exactly (creator, or Owner/Manager, can edit/cancel; `Status: Cancelled` entries are never edit-able again).
+- Ownership/edit rules match Phase 2's permission shape (creator, or Owner/Manager, can edit/cancel; `Status: Cancelled` entries are never edit-able again) — but unlike Bazar/Contributions (2026-09-04 changelog note above), Bill Split's "cancel" is still the original soft-cancel, not a hard delete. Don't generalize the Phase 2 delete behavior here.
 - Bill split settlements feed into the running ledger the same way meal settlements do (§0.6/§5.2) — `BillSplitSettlementDto.Members[*].TotalOwed` (now inclusive of `FixedChargeShare`) is one of the two inputs `cumulativeMemberBalance` sums per period.
 - **Out of scope for now, flagged for later:** the real household's spreadsheet actually splits electricity per-flat with separate AC-unit vs. normal-unit rates, and bills some utility line items across only a subset of members (not the whole household) rather than the full active member list `TariffMetered`/`EqualSplit` assume today. Don't build against this — it's not a stated requirement and the spreadsheet's own formulas for it are ad hoc — but if multi-flat billing becomes a real ask, it'll need a "which members does this specific bill apply to" concept that the current `BillSplit` model doesn't have (it always splits shared cost, and now fixed charges too, across *all* active household members).
 

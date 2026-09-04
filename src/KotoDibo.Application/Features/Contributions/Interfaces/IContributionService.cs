@@ -12,5 +12,8 @@ public interface IContributionService
 
     Task<ContributionDto> UpdateAsync(string householdId, string callerUserId, string contributionId, UpdateContributionRequest request, CancellationToken cancellationToken = default);
 
-    Task<ContributionDto> CancelAsync(string householdId, string callerUserId, string contributionId, CancellationToken cancellationToken = default);
+    // Hard delete — permanently removes the contribution from the database. No soft-cancel state;
+    // nothing is left behind to undo. Rejected outright for an auto-generated (AutoFromBazar) row —
+    // delete its originating Bazar purchase instead (see BazarPurchaseService.DeleteAsync).
+    Task DeleteAsync(string householdId, string callerUserId, string contributionId, CancellationToken cancellationToken = default);
 }

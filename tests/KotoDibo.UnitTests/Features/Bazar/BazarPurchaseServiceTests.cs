@@ -274,28 +274,30 @@ public class BazarPurchaseServiceTests
     }
 
     [Fact]
-    public async Task CancelAsync_AlreadyCancelled_ThrowsDomainException()
+    public async Task DeleteAsync_LegacyCancelledRow_StillDeletes()
     {
+        // Deletion is a hard delete now — there's no "already cancelled" state that blocks it;
+        // even a pre-existing soft-cancelled row from before this change can be permanently removed.
         var purchase = ActivePurchase(purchasedByUserId: "buyer-1");
         purchase.Status = FinancialEntryStatus.Cancelled;
         GivenExistingPurchase(purchase);
         GivenMembership(Membership(HouseholdRole.Member, "buyer-1"));
 
-        var act = () => _sut.CancelAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
+        await _sut.DeleteAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
 
-        await act.Should().ThrowAsync<DomainException>();
+        _purchases.Verify(x => x.DeleteAsync("purchase-1", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task CancelAsync_ByOwnerOfPurchase_SetsStatusCancelled()
+    public async Task DeleteAsync_ByOwnerOfPurchase_RemovesPurchase()
     {
         var purchase = ActivePurchase(purchasedByUserId: "buyer-1");
         GivenExistingPurchase(purchase);
         GivenMembership(Membership(HouseholdRole.Member, "buyer-1"));
 
-        var result = await _sut.CancelAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
+        await _sut.DeleteAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
 
-        result.Status.Should().Be(nameof(FinancialEntryStatus.Cancelled));
+        _purchases.Verify(x => x.DeleteAsync("purchase-1", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -411,29 +413,35 @@ public class BazarPurchaseServiceTests
     }
 
     [Fact]
-    public async Task CancelAsync_PersonalFundedPurchase_CascadeCancelsLinkedContribution()
+    public async Task UpdateAsync_SwitchFromPersonalToHouseholdFund_DeletesNoLongerNeededLinkedContribution()
+    {
+        // Switching funding source away from Personal means the mirror no longer represents
+        // anything real — it must be deleted outright (not soft-cancelled) as part of reconciling
+        // the purchase's new state.
+        _householdBalanceService.Setup(x => x.GetCurrentBalanceAsync("household-1", It.IsAny<CancellationToken>())).ReturnsAsync(5000m);
+        var purchase = ActivePurchase(purchasedByUserId: "buyer-1", amount: 1000m);
+        purchase.FundingSource = BazarFundingSource.Personal;
+        purchase.LinkedContributionId = "mirrored-contribution-1";
+        GivenExistingPurchase(purchase);
+        GivenMembership(Membership(HouseholdRole.Member, "buyer-1"));
+
+        var result = await _sut.UpdateAsync("household-1", "buyer-1", "purchase-1", new UpdateBazarPurchaseRequest { FundingSource = nameof(BazarFundingSource.HouseholdFund) }, CancellationToken.None);
+
+        result.LinkedContributionId.Should().BeNull();
+        _contributions.Verify(x => x.DeleteAsync("mirrored-contribution-1", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_PersonalFundedPurchase_CascadeDeletesLinkedContribution()
     {
         var purchase = ActivePurchase(purchasedByUserId: "buyer-1");
         purchase.LinkedContributionId = "mirrored-contribution-1";
-        var linkedContribution = new Contribution
-        {
-            Id = "mirrored-contribution-1",
-            HouseholdId = "household-1",
-            ContributedByUserId = "buyer-1",
-            Amount = 500m,
-            Currency = "BDT",
-            SourceType = ContributionSourceType.AutoFromBazar,
-            SourceBazarPurchaseId = "purchase-1",
-            Status = FinancialEntryStatus.Active,
-        };
         GivenExistingPurchase(purchase);
-        _contributions.Setup(x => x.GetByIdAsync("mirrored-contribution-1", It.IsAny<CancellationToken>())).ReturnsAsync(linkedContribution);
         GivenMembership(Membership(HouseholdRole.Member, "buyer-1"));
 
-        await _sut.CancelAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
+        await _sut.DeleteAsync("household-1", "buyer-1", "purchase-1", CancellationToken.None);
 
-        _contributions.Verify(x => x.UpdateAsync(
-            It.Is<Contribution>(c => c.Id == "mirrored-contribution-1" && c.Status == FinancialEntryStatus.Cancelled),
-            It.IsAny<CancellationToken>()), Times.Once);
+        _contributions.Verify(x => x.DeleteAsync("mirrored-contribution-1", It.IsAny<CancellationToken>()), Times.Once);
+        _purchases.Verify(x => x.DeleteAsync("purchase-1", It.IsAny<CancellationToken>()), Times.Once);
     }
 }

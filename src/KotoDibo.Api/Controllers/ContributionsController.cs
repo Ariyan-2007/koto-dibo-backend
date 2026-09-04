@@ -58,11 +58,14 @@ public class ContributionsController : ControllerBase
         return Ok(contribution);
     }
 
-    [HttpPost("{contributionId}/cancel")]
-    public async Task<ActionResult<ContributionDto>> Cancel(string householdId, string contributionId, CancellationToken cancellationToken)
+    // Hard delete — permanently removes this contribution. No soft-cancel state: there's nothing
+    // left in the database to undo this with. Rejected (400) for a Contribution auto-generated from
+    // a Bazar purchase — delete that purchase instead (DELETE .../bazar/{purchaseId}).
+    [HttpDelete("{contributionId}")]
+    public async Task<IActionResult> Delete(string householdId, string contributionId, CancellationToken cancellationToken)
     {
-        var contribution = await _contributionService.CancelAsync(householdId, UserId, contributionId, cancellationToken);
-        return Ok(contribution);
+        await _contributionService.DeleteAsync(householdId, UserId, contributionId, cancellationToken);
+        return NoContent();
     }
 
     private string UserId => _currentUserService.UserId!;

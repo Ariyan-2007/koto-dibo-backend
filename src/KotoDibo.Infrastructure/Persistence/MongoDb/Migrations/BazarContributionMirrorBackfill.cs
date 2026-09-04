@@ -15,6 +15,15 @@ namespace KotoDibo.Infrastructure.Persistence.MongoDb.Migrations;
 //
 // Idempotent: only touches purchases that don't already have a LinkedContributionId, so it's safe
 // to run on every startup — after the first run it finds nothing to do.
+//
+// The FundingSource condition below matches BOTH an explicit "Personal" value AND the field being
+// entirely absent. This matters because this query runs server-side against the raw stored BSON,
+// not through the C# driver's object mapper — a genuinely pre-funding-source-split document has no
+// FundingSource field in Mongo at all (that property didn't exist yet when it was written), so a
+// plain Eq(..., Personal) filter silently excludes it even though BazarPurchase.FundingSource's
+// C#-side default (Personal) makes it read back as "Personal" through the API. Missing that case
+// here means the very oldest, truest candidates for this backfill — the ones with no funding-source
+// concept at all — would never actually get backfilled.
 public static class BazarContributionMirrorBackfill
 {
     public static async Task RunAsync(MongoDbContext context, CancellationToken cancellationToken = default)
@@ -22,8 +31,12 @@ public static class BazarContributionMirrorBackfill
         var purchases = context.GetCollection<BazarPurchase>(nameof(BazarPurchase));
         var contributions = context.GetCollection<Contribution>(nameof(Contribution));
 
-        var filter = Builders<BazarPurchase>.Filter.And(
+        var isPersonalOrUnset = Builders<BazarPurchase>.Filter.Or(
             Builders<BazarPurchase>.Filter.Eq(p => p.FundingSource, BazarFundingSource.Personal),
+            Builders<BazarPurchase>.Filter.Exists(p => p.FundingSource, exists: false));
+
+        var filter = Builders<BazarPurchase>.Filter.And(
+            isPersonalOrUnset,
             Builders<BazarPurchase>.Filter.Eq(p => p.LinkedContributionId, null),
             Builders<BazarPurchase>.Filter.Gt(p => p.Amount, 0m));
 

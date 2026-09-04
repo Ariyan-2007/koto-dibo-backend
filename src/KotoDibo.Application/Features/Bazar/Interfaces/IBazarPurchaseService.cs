@@ -12,5 +12,7 @@ public interface IBazarPurchaseService
 
     Task<BazarPurchaseDto> UpdateAsync(string householdId, string callerUserId, string purchaseId, UpdateBazarPurchaseRequest request, CancellationToken cancellationToken = default);
 
-    Task<BazarPurchaseDto> CancelAsync(string householdId, string callerUserId, string purchaseId, CancellationToken cancellationToken = default);
+    // Hard delete — permanently removes the purchase (and its mirrored Contribution, if any) from
+    // the database. No soft-cancel state; nothing is left behind to undo.
+    Task DeleteAsync(string householdId, string callerUserId, string purchaseId, CancellationToken cancellationToken = default);
 }

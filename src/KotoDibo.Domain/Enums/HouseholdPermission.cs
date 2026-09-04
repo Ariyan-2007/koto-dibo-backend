@@ -16,13 +16,13 @@ public enum HouseholdPermission
     AddAnyBazarPurchase,
     ViewBazar,
     UpdateBazarPurchase,
-    CancelBazarPurchase,
+    DeleteBazarPurchase,
 
     AddContribution,
     AddAnyContribution,
     ViewContributions,
     UpdateContribution,
-    CancelContribution,
+    DeleteContribution,
 
     ViewHouseholdBalance,
 
