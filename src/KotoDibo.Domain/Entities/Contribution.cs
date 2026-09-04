@@ -9,6 +9,13 @@ public class Contribution
     public string Id { get; set; } = string.Empty;
     public string HouseholdId { get; set; } = string.Empty;
     public string ContributedByUserId { get; set; } = string.Empty;
+
+    // Who actually submitted this record — equals ContributedByUserId unless an Owner/Manager
+    // recorded it on the contributor's behalf, or it was auto-generated from a Bazar purchase (in
+    // which case this mirrors that purchase's own CreatedByUserId). Kept distinct from
+    // ContributedByUserId (the financial owner/beneficiary) for audit purposes.
+    public string CreatedByUserId { get; set; } = string.Empty;
+
     public DateOnly Date { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = string.Empty;

@@ -19,29 +19,66 @@ public class MongoRepository<T> : IRepository<T> where T : class
     private static readonly Expression<Func<T, string>> IdSelector = BuildIdSelector();
 
     private readonly IMongoCollection<T> _collection;
+    private readonly IMongoSessionAccessor _sessionAccessor;
 
-    public MongoRepository(MongoDbContext context)
+    public MongoRepository(MongoDbContext context, IMongoSessionAccessor sessionAccessor)
     {
         _collection = context.GetCollection<T>(typeof(T).Name);
+        _sessionAccessor = sessionAccessor;
     }
 
+    // Every call below routes through the ambient session (if IUnitOfWork.ExecuteAsync has one
+    // active for this async flow) so it's automatically enlisted in that transaction; outside a
+    // unit-of-work scope, Session is null and behavior is exactly what it was before transactions
+    // existed.
+    private IClientSessionHandle? Session => _sessionAccessor.Session;
+
     public async Task<T?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
-        => await _collection.Find(Builders<T>.Filter.Eq(IdSelector, id)).FirstOrDefaultAsync(cancellationToken);
+    {
+        var filter = Builders<T>.Filter.Eq(IdSelector, id);
+        var session = Session;
+        return session is null
+            ? await _collection.Find(filter).FirstOrDefaultAsync(cancellationToken)
+            : await _collection.Find(session, filter).FirstOrDefaultAsync(cancellationToken);
+    }
 
     public async Task<T?> FindOneAsync(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default)
-        => await _collection.Find(predicate).FirstOrDefaultAsync(cancellationToken);
+    {
+        var session = Session;
+        return session is null
+            ? await _collection.Find(predicate).FirstOrDefaultAsync(cancellationToken)
+            : await _collection.Find(session, predicate).FirstOrDefaultAsync(cancellationToken);
+    }
 
     public async Task<IReadOnlyList<T>> FindAsync(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default)
-        => await _collection.Find(predicate).ToListAsync(cancellationToken);
+    {
+        var session = Session;
+        return session is null
+            ? await _collection.Find(predicate).ToListAsync(cancellationToken)
+            : await _collection.Find(session, predicate).ToListAsync(cancellationToken);
+    }
 
     public async Task<IReadOnlyList<T>> GetAllAsync(CancellationToken cancellationToken = default)
-        => await _collection.Find(FilterDefinition<T>.Empty).ToListAsync(cancellationToken);
+    {
+        var session = Session;
+        return session is null
+            ? await _collection.Find(FilterDefinition<T>.Empty).ToListAsync(cancellationToken)
+            : await _collection.Find(session, FilterDefinition<T>.Empty).ToListAsync(cancellationToken);
+    }
 
     public async Task<T> AddAsync(T entity, CancellationToken cancellationToken = default)
     {
         try
         {
-            await _collection.InsertOneAsync(entity, options: null, cancellationToken);
+            var session = Session;
+            if (session is null)
+            {
+                await _collection.InsertOneAsync(entity, options: null, cancellationToken);
+            }
+            else
+            {
+                await _collection.InsertOneAsync(session, entity, options: null, cancellationToken);
+            }
         }
         catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
         {
@@ -54,11 +91,31 @@ public class MongoRepository<T> : IRepository<T> where T : class
     public async Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
     {
         var id = (string)IdProperty.GetValue(entity)!;
-        await _collection.ReplaceOneAsync(Builders<T>.Filter.Eq(IdSelector, id), entity, cancellationToken: cancellationToken);
+        var filter = Builders<T>.Filter.Eq(IdSelector, id);
+        var session = Session;
+        if (session is null)
+        {
+            await _collection.ReplaceOneAsync(filter, entity, cancellationToken: cancellationToken);
+        }
+        else
+        {
+            await _collection.ReplaceOneAsync(session, filter, entity, cancellationToken: cancellationToken);
+        }
     }
 
     public async Task DeleteAsync(string id, CancellationToken cancellationToken = default)
-        => await _collection.DeleteOneAsync(Builders<T>.Filter.Eq(IdSelector, id), cancellationToken);
+    {
+        var filter = Builders<T>.Filter.Eq(IdSelector, id);
+        var session = Session;
+        if (session is null)
+        {
+            await _collection.DeleteOneAsync(filter, cancellationToken);
+        }
+        else
+        {
+            await _collection.DeleteOneAsync(session, filter, cancellationToken: cancellationToken);
+        }
+    }
 
     private static Expression<Func<T, string>> BuildIdSelector()
     {

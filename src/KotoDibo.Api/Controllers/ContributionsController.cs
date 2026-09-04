@@ -23,7 +23,17 @@ public class ContributionsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ContributionDto>> Create(string householdId, CreateContributionRequest request, CancellationToken cancellationToken)
     {
-        var contribution = await _contributionService.CreateAsync(householdId, UserId, request, cancellationToken);
+        var contribution = await _contributionService.CreateAsync(householdId, UserId, UserId, request, cancellationToken);
+        return CreatedAtAction(nameof(GetById), new { householdId, contributionId = contribution.Id }, contribution);
+    }
+
+    // On-behalf-of creation: an Owner/Manager can record a Contribution for another member (e.g.
+    // cash handed to them in person). The financial credit belongs to {userId}; UserId (the caller)
+    // is recorded separately as CreatedByUserId for audit — see ContributionService.CreateAsync.
+    [HttpPost("{userId}")]
+    public async Task<ActionResult<ContributionDto>> CreateFor(string householdId, string userId, CreateContributionRequest request, CancellationToken cancellationToken)
+    {
+        var contribution = await _contributionService.CreateAsync(householdId, UserId, userId, request, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { householdId, contributionId = contribution.Id }, contribution);
     }
 

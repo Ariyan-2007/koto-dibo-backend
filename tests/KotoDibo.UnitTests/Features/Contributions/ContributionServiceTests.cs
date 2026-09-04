@@ -77,7 +77,7 @@ public class ContributionServiceTests
     {
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));
 
-        var result = await _sut.CreateAsync("household-1", "member-1", new CreateContributionRequest
+        var result = await _sut.CreateAsync("household-1", "member-1", "member-1", new CreateContributionRequest
         {
             Date = Today,
             Amount = 2450m,
@@ -87,7 +87,40 @@ public class ContributionServiceTests
 
         result.Amount.Should().Be(2450m);
         result.ContributedByUserId.Should().Be("member-1");
+        result.CreatedByUserId.Should().Be("member-1");
         result.Status.Should().Be(nameof(FinancialEntryStatus.Active));
+    }
+
+    [Fact]
+    public async Task CreateAsync_ByManagerOnBehalfOfMember_OwnerIsTargetAndCreatorIsCaller()
+    {
+        GivenMembership(Membership(HouseholdRole.Manager, "manager-1"));
+
+        var result = await _sut.CreateAsync("household-1", "manager-1", "member-2", new CreateContributionRequest
+        {
+            Date = Today,
+            Amount = 3000m,
+            Currency = "BDT",
+            Notes = "Handed over in person",
+        });
+
+        result.ContributedByUserId.Should().Be("member-2");
+        result.CreatedByUserId.Should().Be("manager-1");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ByMemberOnBehalfOfAnotherMember_ThrowsForbidden()
+    {
+        GivenMembership(Membership(HouseholdRole.Member, "member-1"));
+
+        var act = () => _sut.CreateAsync("household-1", "member-1", "member-2", new CreateContributionRequest
+        {
+            Date = Today,
+            Amount = 100m,
+            Currency = "BDT",
+        });
+
+        await act.Should().ThrowAsync<ForbiddenException>();
     }
 
     [Fact]
@@ -95,7 +128,7 @@ public class ContributionServiceTests
     {
         GivenMembership(Membership(HouseholdRole.Member, "member-1"));
 
-        var act = () => _sut.CreateAsync("household-1", "member-1", new CreateContributionRequest
+        var act = () => _sut.CreateAsync("household-1", "member-1", "member-1", new CreateContributionRequest
         {
             Date = Today.AddDays(1),
             Amount = 100m,
@@ -110,7 +143,7 @@ public class ContributionServiceTests
     {
         GivenMembership(Membership(HouseholdRole.Viewer, "viewer-1"));
 
-        var act = () => _sut.CreateAsync("household-1", "viewer-1", new CreateContributionRequest
+        var act = () => _sut.CreateAsync("household-1", "viewer-1", "viewer-1", new CreateContributionRequest
         {
             Date = Today,
             Amount = 100m,

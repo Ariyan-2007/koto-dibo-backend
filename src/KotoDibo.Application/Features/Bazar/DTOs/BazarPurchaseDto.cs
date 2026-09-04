@@ -5,6 +5,7 @@ public record BazarPurchaseDto
     public string Id { get; init; } = string.Empty;
     public string HouseholdId { get; init; } = string.Empty;
     public string PurchasedByUserId { get; init; } = string.Empty;
+    public string CreatedByUserId { get; init; } = string.Empty;
     public DateOnly Date { get; init; }
     public decimal Amount { get; init; }
     public string Currency { get; init; } = string.Empty;

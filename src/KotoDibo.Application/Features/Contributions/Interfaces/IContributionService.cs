@@ -4,7 +4,7 @@ namespace KotoDibo.Application.Features.Contributions.Interfaces;
 
 public interface IContributionService
 {
-    Task<ContributionDto> CreateAsync(string householdId, string callerUserId, CreateContributionRequest request, CancellationToken cancellationToken = default);
+    Task<ContributionDto> CreateAsync(string householdId, string callerUserId, string targetUserId, CreateContributionRequest request, CancellationToken cancellationToken = default);
 
     Task<ContributionDto> GetByIdAsync(string householdId, string callerUserId, string contributionId, CancellationToken cancellationToken = default);
 

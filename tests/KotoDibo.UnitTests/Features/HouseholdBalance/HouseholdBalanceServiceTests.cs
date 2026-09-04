@@ -128,4 +128,125 @@ public class HouseholdBalanceServiceTests
 
         await act.Should().ThrowAsync<NotFoundException>();
     }
+
+    [Fact]
+    public async Task GetBalanceAsync_PersonalPocketBazarWithMirroredContribution_NetsToZeroImpact()
+    {
+        // The spec's core Scenario 1 worked example: a 1000 personal-pocket purchase mirrors as a
+        // 1000 Contribution. Balance must land back at exactly what it was before both rows
+        // existed — the mirrored credit must not silently inflate the pool.
+        var mirroredContribution = new Contribution
+        {
+            Id = "mirror-1",
+            HouseholdId = "household-1",
+            ContributedByUserId = "ariyan",
+            Date = Today,
+            Amount = 1000m,
+            Currency = "BDT",
+            SourceType = ContributionSourceType.AutoFromBazar,
+            SourceBazarPurchaseId = "purchase-1",
+            Status = FinancialEntryStatus.Active,
+        };
+        var personalPurchase = new BazarPurchase
+        {
+            Id = "purchase-1",
+            HouseholdId = "household-1",
+            PurchasedByUserId = "ariyan",
+            Date = Today,
+            Amount = 1000m,
+            Currency = "BDT",
+            FundingSource = BazarFundingSource.Personal,
+            LinkedContributionId = "mirror-1",
+            Status = FinancialEntryStatus.Active,
+        };
+
+        _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([mirroredContribution]);
+        _purchases.Setup(x => x.FindAsync(It.IsAny<Expression<Func<BazarPurchase, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([personalPurchase]);
+
+        var result = await _sut.GetBalanceAsync("household-1", "caller-1", CancellationToken.None);
+
+        result.CurrentBalance.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task GetTransactionsAsync_MixedPersonalAndFundPurchases_BalanceImpactSumsToCurrentBalance()
+    {
+        // Ariyan contributes 1000 manually, then buys 500 of Bazar personally (mirrored as its own
+        // Contribution row — both present here, as BazarPurchaseService would leave them). Waythin
+        // then draws 300 from the fund. Expected balance: 1000 + 500 - 500 - 300 = 700 — the
+        // personal purchase's mirrored Contribution (+500) and its own BalanceImpact (-500) cancel
+        // each other out, leaving only the manual contribution and the fund draw to net together.
+        var mirroredContribution = new Contribution
+        {
+            Id = "contribution-mirror",
+            HouseholdId = "household-1",
+            ContributedByUserId = "ariyan",
+            CreatedByUserId = "ariyan",
+            Date = Today,
+            Amount = 500m,
+            Currency = "BDT",
+            SourceType = ContributionSourceType.AutoFromBazar,
+            SourceBazarPurchaseId = "purchase-personal",
+            Status = FinancialEntryStatus.Active,
+        };
+        var manualContribution = new Contribution
+        {
+            Id = "contribution-manual",
+            HouseholdId = "household-1",
+            ContributedByUserId = "ariyan",
+            CreatedByUserId = "ariyan",
+            Date = Today,
+            Amount = 1000m,
+            Currency = "BDT",
+            SourceType = ContributionSourceType.Manual,
+            Status = FinancialEntryStatus.Active,
+        };
+        var personalPurchase = new BazarPurchase
+        {
+            Id = "purchase-personal",
+            HouseholdId = "household-1",
+            PurchasedByUserId = "ariyan",
+            CreatedByUserId = "ariyan",
+            Date = Today,
+            Amount = 500m,
+            Currency = "BDT",
+            FundingSource = BazarFundingSource.Personal,
+            LinkedContributionId = "contribution-mirror",
+            Status = FinancialEntryStatus.Active,
+        };
+        var fundPurchase = new BazarPurchase
+        {
+            Id = "purchase-fund",
+            HouseholdId = "household-1",
+            PurchasedByUserId = "waythin",
+            CreatedByUserId = "waythin",
+            Date = Today,
+            Amount = 300m,
+            Currency = "BDT",
+            FundingSource = BazarFundingSource.HouseholdFund,
+            Status = FinancialEntryStatus.Active,
+        };
+
+        _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([mirroredContribution, manualContribution]);
+        _purchases.Setup(x => x.FindAsync(It.IsAny<Expression<Func<BazarPurchase, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([personalPurchase, fundPurchase]);
+
+        var transactions = await _sut.GetTransactionsAsync("household-1", "caller-1", from: null, to: null, status: null, CancellationToken.None);
+
+        transactions.Should().HaveCount(4);
+        transactions.Sum(t => t.BalanceImpact).Should().Be(700m);
+        transactions.Single(t => t.Id == "purchase-personal").BalanceImpact.Should().Be(-500m);
+        transactions.Single(t => t.Id == "purchase-fund").BalanceImpact.Should().Be(-300m);
+        transactions.Single(t => t.Id == "contribution-mirror").BalanceImpact.Should().Be(500m);
+        transactions.Single(t => t.Id == "contribution-mirror").LinkedEntryId.Should().Be("purchase-personal");
+        transactions.Single(t => t.Id == "purchase-personal").LinkedEntryId.Should().Be("contribution-mirror");
+
+        // Every household member must see one consistent financial state — the balance summary and
+        // the transaction feed must never disagree about what the current balance actually is.
+        var balance = await _sut.GetBalanceAsync("household-1", "caller-1", CancellationToken.None);
+        balance.CurrentBalance.Should().Be(transactions.Sum(t => t.BalanceImpact));
+    }
 }

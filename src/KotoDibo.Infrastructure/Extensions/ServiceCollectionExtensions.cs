@@ -61,6 +61,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IQrCodeService, QrCodeService>();
 
         services.AddSingleton<MongoDbContext>();
+        services.AddSingleton<IMongoSessionAccessor, MongoSessionAccessor>();
+        services.AddScoped<IUnitOfWork, MongoUnitOfWork>();
         services.AddScoped(typeof(IRepository<>), typeof(MongoRepository<>));
 
         services.AddScoped<IPasswordHasher, PasswordHasher>();

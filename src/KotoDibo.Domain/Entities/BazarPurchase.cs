@@ -7,6 +7,12 @@ public class BazarPurchase
     public string Id { get; set; } = string.Empty;
     public string HouseholdId { get; set; } = string.Empty;
     public string PurchasedByUserId { get; set; } = string.Empty;
+
+    // Who actually submitted this record — equals PurchasedByUserId unless an Owner/Manager
+    // recorded it on the buyer's behalf (see BazarPurchaseService.RequireTargetAccess). Kept
+    // distinct from PurchasedByUserId (the financial owner/beneficiary) for audit purposes.
+    public string CreatedByUserId { get; set; } = string.Empty;
+
     public DateOnly Date { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = string.Empty;

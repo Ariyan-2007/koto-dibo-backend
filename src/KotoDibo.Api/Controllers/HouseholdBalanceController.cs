@@ -27,5 +27,15 @@ public class HouseholdBalanceController : ControllerBase
         return Ok(balance);
     }
 
+    // Contribution + BazarPurchase rows merged into one chronological ledger — the "transaction
+    // history" behind the balance above, so the frontend doesn't have to fetch and merge both lists
+    // itself just to render a combined feed.
+    [HttpGet("transactions")]
+    public async Task<ActionResult<IReadOnlyList<HouseholdLedgerTransactionDto>>> GetTransactions(string householdId, [FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] string? status, CancellationToken cancellationToken)
+    {
+        var transactions = await _householdBalanceService.GetTransactionsAsync(householdId, UserId, from, to, status, cancellationToken);
+        return Ok(transactions);
+    }
+
     private string UserId => _currentUserService.UserId!;
 }

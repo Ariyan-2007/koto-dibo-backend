@@ -46,6 +46,7 @@ public class BazarPurchaseServiceTests
             _householdBalanceService.Object,
             access,
             _dateTimeProvider.Object,
+            new TestHelpers.PassthroughUnitOfWork(),
             new CreateBazarPurchaseRequestValidator(),
             new UpdateBazarPurchaseRequestValidator());
     }
@@ -196,6 +197,28 @@ public class BazarPurchaseServiceTests
         });
 
         result.PurchasedByUserId.Should().Be("member-2");
+        result.CreatedByUserId.Should().Be("manager-1");
+    }
+
+    [Fact]
+    public async Task CreateAsync_PersonalFundingOnBehalfOfMember_MirroredContributionCreatedByIsTheRecorder()
+    {
+        // The mirrored Contribution's financial owner is the buyer (member-2), but its
+        // CreatedByUserId must trace back to whoever actually submitted the Bazar entry
+        // (manager-1) — not silently overwritten with the buyer's identity.
+        GivenMembership(Membership(HouseholdRole.Manager, "manager-1"));
+
+        await _sut.CreateAsync("household-1", "manager-1", "member-2", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = 400m,
+            Currency = "BDT",
+            FundingSource = nameof(BazarFundingSource.Personal),
+        });
+
+        _contributions.Verify(x => x.AddAsync(
+            It.Is<Contribution>(c => c.ContributedByUserId == "member-2" && c.CreatedByUserId == "manager-1"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -349,6 +372,42 @@ public class BazarPurchaseServiceTests
         });
 
         await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+    }
+
+    [Fact]
+    public async Task UpdateAsync_PersonalFundedPurchase_AmountChange_ReconcilesLinkedContributionInPlace_NoDuplicate()
+    {
+        // The worked example from the spec: Bazar 1000 -> 1500 must update the same mirrored
+        // Contribution to 1500 in place, never create a second one and never leave the old 1000
+        // amount stale on either record.
+        var purchase = ActivePurchase(purchasedByUserId: "buyer-1", amount: 1000m);
+        purchase.FundingSource = BazarFundingSource.Personal;
+        purchase.LinkedContributionId = "mirrored-contribution-1";
+        var linkedContribution = new Contribution
+        {
+            Id = "mirrored-contribution-1",
+            HouseholdId = "household-1",
+            ContributedByUserId = "buyer-1",
+            CreatedByUserId = "buyer-1",
+            Amount = 1000m,
+            Currency = "BDT",
+            Date = Today,
+            SourceType = ContributionSourceType.AutoFromBazar,
+            SourceBazarPurchaseId = "purchase-1",
+            Status = FinancialEntryStatus.Active,
+        };
+        GivenExistingPurchase(purchase);
+        _contributions.Setup(x => x.GetByIdAsync("mirrored-contribution-1", It.IsAny<CancellationToken>())).ReturnsAsync(linkedContribution);
+        GivenMembership(Membership(HouseholdRole.Member, "buyer-1"));
+
+        var result = await _sut.UpdateAsync("household-1", "buyer-1", "purchase-1", new UpdateBazarPurchaseRequest { Amount = 1500m }, CancellationToken.None);
+
+        result.Amount.Should().Be(1500m);
+        result.LinkedContributionId.Should().Be("mirrored-contribution-1");
+        _contributions.Verify(x => x.AddAsync(It.IsAny<Contribution>(), It.IsAny<CancellationToken>()), Times.Never);
+        _contributions.Verify(x => x.UpdateAsync(
+            It.Is<Contribution>(c => c.Id == "mirrored-contribution-1" && c.Amount == 1500m),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

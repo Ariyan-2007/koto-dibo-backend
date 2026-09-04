@@ -18,6 +18,7 @@ var mongoDbContext = app.Services.GetRequiredService<MongoDbContext>();
 await MongoIndexInitializer.InitializeAsync(mongoDbContext);
 await TariffConfigSeeder.SeedAsync(mongoDbContext);
 await ExpenseCategorySeeder.SeedAsync(mongoDbContext);
+await CreatedByAuditBackfill.RunAsync(mongoDbContext);
 await BazarContributionMirrorBackfill.RunAsync(mongoDbContext);
 
 app.UseApiPipeline();

@@ -32,17 +32,25 @@ public class ContributionService : IContributionService
         _updateValidator = updateValidator;
     }
 
-    public async Task<ContributionDto> CreateAsync(string householdId, string callerUserId, CreateContributionRequest request, CancellationToken cancellationToken = default)
+    public async Task<ContributionDto> CreateAsync(string householdId, string callerUserId, string targetUserId, CreateContributionRequest request, CancellationToken cancellationToken = default)
     {
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
-        await _access.RequireMembershipAsync(householdId, callerUserId, HouseholdPermission.AddContribution, cancellationToken);
+
+        var membership = await _access.RequireMembershipAsync(householdId, callerUserId, HouseholdPermission.AddContribution, cancellationToken);
+        BazarPurchaseService.RequireTargetAccess(membership.Role, callerUserId, targetUserId, HouseholdPermission.AddAnyContribution);
         RequireNotFuture(request.Date, nameof(request.Date));
+
+        // Confirms the target is an active member of this household (everyone has ViewHousehold) —
+        // mirrors BazarPurchaseService.CreateAsync so an Owner/Manager can't credit a cross-household
+        // user ID.
+        await _access.RequireMembershipAsync(householdId, targetUserId, HouseholdPermission.ViewHousehold, cancellationToken);
 
         var now = _dateTimeProvider.UtcNow;
         var contribution = new Contribution
         {
             HouseholdId = householdId,
-            ContributedByUserId = callerUserId,
+            ContributedByUserId = targetUserId,
+            CreatedByUserId = callerUserId,
             Date = request.Date,
             Amount = request.Amount,
             Currency = request.Currency.Trim().ToUpperInvariant(),
@@ -186,6 +194,7 @@ public class ContributionService : IContributionService
         Id = contribution.Id,
         HouseholdId = contribution.HouseholdId,
         ContributedByUserId = contribution.ContributedByUserId,
+        CreatedByUserId = contribution.CreatedByUserId,
         Date = contribution.Date,
         Amount = contribution.Amount,
         Currency = contribution.Currency,

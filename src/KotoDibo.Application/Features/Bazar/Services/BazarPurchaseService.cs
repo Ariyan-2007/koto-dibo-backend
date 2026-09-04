@@ -18,6 +18,7 @@ public class BazarPurchaseService : IBazarPurchaseService
     private readonly IHouseholdBalanceService _householdBalanceService;
     private readonly IHouseholdAccessService _access;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IValidator<CreateBazarPurchaseRequest> _createValidator;
     private readonly IValidator<UpdateBazarPurchaseRequest> _updateValidator;
 
@@ -27,6 +28,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         IHouseholdBalanceService householdBalanceService,
         IHouseholdAccessService access,
         IDateTimeProvider dateTimeProvider,
+        IUnitOfWork unitOfWork,
         IValidator<CreateBazarPurchaseRequest> createValidator,
         IValidator<UpdateBazarPurchaseRequest> updateValidator)
     {
@@ -35,6 +37,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         _householdBalanceService = householdBalanceService;
         _access = access;
         _dateTimeProvider = dateTimeProvider;
+        _unitOfWork = unitOfWork;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
     }
@@ -44,7 +47,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         await _createValidator.ValidateAndThrowAsync(request, cancellationToken);
 
         var membership = await _access.RequireMembershipAsync(householdId, callerUserId, HouseholdPermission.AddBazarPurchase, cancellationToken);
-        RequireTargetAccess(membership.Role, callerUserId, targetUserId);
+        RequireTargetAccess(membership.Role, callerUserId, targetUserId, HouseholdPermission.AddAnyBazarPurchase);
         RequireNotFuture(request.Date, nameof(request.Date));
 
         // Confirms the target is an active member of this household (everyone has ViewHousehold).
@@ -63,6 +66,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         {
             HouseholdId = householdId,
             PurchasedByUserId = targetUserId,
+            CreatedByUserId = callerUserId,
             Date = request.Date,
             Amount = request.Amount,
             Currency = currency,
@@ -73,19 +77,25 @@ public class BazarPurchaseService : IBazarPurchaseService
             UpdatedAt = now,
         };
 
-        await _purchases.AddAsync(purchase, cancellationToken);
-
-        // A purchase paid personally is, from the household's point of view, money the buyer just
-        // put in and immediately spent — so it counts as a Contribution too. A leftover/correction
-        // entry (Amount <= 0) has no such mirror: there's no cash to credit for a negative spend.
-        if (fundingSource == BazarFundingSource.Personal && purchase.Amount > 0)
+        // The purchase plus its mirrored Contribution (when applicable) must land together or not
+        // at all — a crash between the two inserts would otherwise leave a purchase with no credit
+        // for the money the buyer put in, or a floating LinkedContributionId pointing nowhere.
+        return await _unitOfWork.ExecuteAsync(async ct =>
         {
-            var contribution = await CreateLinkedContributionAsync(purchase, now, cancellationToken);
-            purchase.LinkedContributionId = contribution.Id;
-            await _purchases.UpdateAsync(purchase, cancellationToken);
-        }
+            await _purchases.AddAsync(purchase, ct);
 
-        return ToDto(purchase);
+            // A purchase paid personally is, from the household's point of view, money the buyer just
+            // put in and immediately spent — so it counts as a Contribution too. A leftover/correction
+            // entry (Amount <= 0) has no such mirror: there's no cash to credit for a negative spend.
+            if (fundingSource == BazarFundingSource.Personal && purchase.Amount > 0)
+            {
+                var contribution = await CreateLinkedContributionAsync(purchase, now, ct);
+                purchase.LinkedContributionId = contribution.Id;
+                await _purchases.UpdateAsync(purchase, ct);
+            }
+
+            return ToDto(purchase);
+        }, cancellationToken);
     }
 
     public async Task<BazarPurchaseDto> GetByIdAsync(string householdId, string callerUserId, string purchaseId, CancellationToken cancellationToken = default)
@@ -180,9 +190,16 @@ public class BazarPurchaseService : IBazarPurchaseService
         }
 
         purchase.UpdatedAt = _dateTimeProvider.UtcNow;
-        await ReconcileLinkedContributionAsync(purchase, oldLinkedContributionId, cancellationToken);
-        await _purchases.UpdateAsync(purchase, cancellationToken);
-        return ToDto(purchase);
+
+        // Reconciling the mirrored Contribution and saving the purchase's own new state must
+        // commit together — otherwise an interrupted edit could leave the Contribution reflecting
+        // the new amount while the purchase (or vice versa) still shows the old one.
+        return await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            await ReconcileLinkedContributionAsync(purchase, oldLinkedContributionId, ct);
+            await _purchases.UpdateAsync(purchase, ct);
+            return ToDto(purchase);
+        }, cancellationToken);
     }
 
     public async Task<BazarPurchaseDto> CancelAsync(string householdId, string callerUserId, string purchaseId, CancellationToken cancellationToken = default)
@@ -196,15 +213,19 @@ public class BazarPurchaseService : IBazarPurchaseService
         purchase.Status = FinancialEntryStatus.Cancelled;
         purchase.UpdatedAt = _dateTimeProvider.UtcNow;
 
-        // The mirrored Contribution only exists because this purchase does — once the purchase is
-        // cancelled, the household never actually received that money, so the mirror must go too.
-        if (purchase.LinkedContributionId is not null)
+        return await _unitOfWork.ExecuteAsync(async ct =>
         {
-            await CancelLinkedContributionAsync(purchase.LinkedContributionId, cancellationToken);
-        }
+            // The mirrored Contribution only exists because this purchase does — once the purchase
+            // is cancelled, the household never actually received that money, so the mirror must
+            // go too, in the same transaction so neither can end up cancelled without the other.
+            if (purchase.LinkedContributionId is not null)
+            {
+                await CancelLinkedContributionAsync(purchase.LinkedContributionId, ct);
+            }
 
-        await _purchases.UpdateAsync(purchase, cancellationToken);
-        return ToDto(purchase);
+            await _purchases.UpdateAsync(purchase, ct);
+            return ToDto(purchase);
+        }, cancellationToken);
     }
 
     private async Task RequireSufficientBalanceAsync(string householdId, decimal amount, string currency, CancellationToken cancellationToken)
@@ -223,6 +244,9 @@ public class BazarPurchaseService : IBazarPurchaseService
         {
             HouseholdId = purchase.HouseholdId,
             ContributedByUserId = purchase.PurchasedByUserId,
+            // Mirrors the purchase's own creator, not necessarily the buyer — e.g. a Manager
+            // recording a purchase on a member's behalf is also who "created" the mirrored credit.
+            CreatedByUserId = purchase.CreatedByUserId,
             Date = purchase.Date,
             Amount = purchase.Amount,
             Currency = purchase.Currency,
@@ -263,6 +287,7 @@ public class BazarPurchaseService : IBazarPurchaseService
             if (existing is not null && existing.Status == FinancialEntryStatus.Active)
             {
                 existing.ContributedByUserId = purchase.PurchasedByUserId;
+                existing.CreatedByUserId = purchase.CreatedByUserId;
                 existing.Date = purchase.Date;
                 existing.Amount = purchase.Amount;
                 existing.Currency = purchase.Currency;
@@ -312,16 +337,19 @@ public class BazarPurchaseService : IBazarPurchaseService
         }
     }
 
-    private static void RequireTargetAccess(HouseholdRole callerRole, string callerUserId, string targetUserId)
+    // Shared with ContributionService for its own "create on behalf of another member" flow — the
+    // rule (self is always fine; anyone else requires the role-level "any" permission) is identical
+    // for both, just gated by a different HouseholdPermission.
+    internal static void RequireTargetAccess(HouseholdRole callerRole, string callerUserId, string targetUserId, HouseholdPermission anyPermission)
     {
         if (targetUserId == callerUserId)
         {
             return;
         }
 
-        if (!HouseholdRolePolicy.HasPermission(callerRole, HouseholdPermission.AddAnyBazarPurchase))
+        if (!HouseholdRolePolicy.HasPermission(callerRole, anyPermission))
         {
-            throw new ForbiddenException("You do not have permission to add bazar purchases for other members.");
+            throw new ForbiddenException("You do not have permission to add records on behalf of other members.");
         }
     }
 
@@ -353,6 +381,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         Id = purchase.Id,
         HouseholdId = purchase.HouseholdId,
         PurchasedByUserId = purchase.PurchasedByUserId,
+        CreatedByUserId = purchase.CreatedByUserId,
         Date = purchase.Date,
         Amount = purchase.Amount,
         Currency = purchase.Currency,

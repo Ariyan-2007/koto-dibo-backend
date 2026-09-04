@@ -42,6 +42,7 @@ public static class BazarContributionMirrorBackfill
             {
                 HouseholdId = purchase.HouseholdId,
                 ContributedByUserId = purchase.PurchasedByUserId,
+                CreatedByUserId = purchase.CreatedByUserId,
                 Date = purchase.Date,
                 Amount = purchase.Amount,
                 Currency = purchase.Currency,

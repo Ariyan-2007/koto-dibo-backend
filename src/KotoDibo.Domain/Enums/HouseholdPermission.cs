@@ -19,6 +19,7 @@ public enum HouseholdPermission
     CancelBazarPurchase,
 
     AddContribution,
+    AddAnyContribution,
     ViewContributions,
     UpdateContribution,
     CancelContribution,
