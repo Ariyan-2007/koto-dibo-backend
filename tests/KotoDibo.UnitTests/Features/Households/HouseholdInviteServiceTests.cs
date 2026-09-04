@@ -32,7 +32,6 @@ public class HouseholdInviteServiceTests
     public HouseholdInviteServiceTests()
     {
         _dateTimeProvider.Setup(x => x.UtcNow).Returns(Now);
-        _inviteSettings.Setup(x => x.BaseUrl).Returns("https://koto-dibo.example/invites");
         _inviteSettings.Setup(x => x.DefaultExpiry).Returns(TimeSpan.FromHours(168));
         _inviteSettings.Setup(x => x.MaxExpiry).Returns(TimeSpan.FromHours(720));
 
@@ -124,7 +123,7 @@ public class HouseholdInviteServiceTests
     {
         GivenMemberships(Membership(HouseholdRole.Owner, "owner-1"));
 
-        var result = await _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Member" });
+        var result = await _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Member", BaseUrl = "https://koto-dibo.example/invites" });
 
         result.Code.Should().NotBeNullOrWhiteSpace();
         result.QrCodeUrl.Should().Be($"https://cdn.example/invites/{result.Code}.png");
@@ -139,7 +138,7 @@ public class HouseholdInviteServiceTests
     {
         GivenMemberships(Membership(HouseholdRole.Owner, "owner-1"));
 
-        await _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Member", Email = "friend@example.com" });
+        await _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Member", Email = "friend@example.com", BaseUrl = "https://koto-dibo.example/invites" });
 
         _emailSender.Verify(x => x.SendAsync("friend@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -149,7 +148,7 @@ public class HouseholdInviteServiceTests
     {
         GivenMemberships(Membership(HouseholdRole.Viewer, "viewer-1"));
 
-        var act = () => _sut.CreateAsync("household-1", "viewer-1", new CreateHouseholdInviteRequest { Role = "Member" });
+        var act = () => _sut.CreateAsync("household-1", "viewer-1", new CreateHouseholdInviteRequest { Role = "Member", BaseUrl = "https://koto-dibo.example/invites" });
 
         await act.Should().ThrowAsync<ForbiddenException>();
     }
@@ -159,7 +158,7 @@ public class HouseholdInviteServiceTests
     {
         GivenMemberships(Membership(HouseholdRole.Owner, "owner-1"));
 
-        var act = () => _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Owner" });
+        var act = () => _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Owner", BaseUrl = "https://koto-dibo.example/invites" });
 
         await act.Should().ThrowAsync<FluentValidation.ValidationException>();
     }

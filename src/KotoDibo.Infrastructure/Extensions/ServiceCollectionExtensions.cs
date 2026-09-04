@@ -39,7 +39,6 @@ public static class ServiceCollectionExtensions
 
         services.AddOptions<InviteSettings>()
             .Bind(configuration.GetSection(InviteSettings.SectionName))
-            .Validate(s => !string.IsNullOrWhiteSpace(s.BaseUrl), "Invites:BaseUrl must be configured.")
             .ValidateOnStart();
         services.AddSingleton<IInviteSettings>(sp => sp.GetRequiredService<IOptions<InviteSettings>>().Value);
 

@@ -6,7 +6,6 @@ public class InviteSettings : IInviteSettings
 {
     public const string SectionName = "Invites";
 
-    public string BaseUrl { get; set; } = string.Empty;
     public int DefaultExpiryHours { get; set; } = 168;
     public int MaxExpiryHours { get; set; } = 720;
 

@@ -83,7 +83,7 @@ public class HouseholdInviteService : IHouseholdInviteService
             CreatedAt = now,
             UpdatedAt = now,
         };
-        invite.InviteLink = $"{_inviteSettings.BaseUrl.TrimEnd('/')}/{invite.Code}";
+        invite.InviteLink = $"{request.BaseUrl.TrimEnd('/')}/{invite.Code}";
 
         var qrBytes = _qrCodeService.GeneratePng(invite.InviteLink);
         using (var qrStream = new MemoryStream(qrBytes))

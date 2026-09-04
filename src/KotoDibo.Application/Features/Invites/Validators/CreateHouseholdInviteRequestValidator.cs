@@ -18,6 +18,11 @@ public class CreateHouseholdInviteRequestValidator : AbstractValidator<CreateHou
             .Must(role => Enum.TryParse<HouseholdRole>(role, ignoreCase: true, out var parsed) && parsed != HouseholdRole.Owner)
             .WithMessage("Role must be one of: Manager, Member, Viewer.");
 
+        RuleFor(x => x.BaseUrl)
+            .NotEmpty()
+            .Must(baseUrl => Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            .WithMessage("BaseUrl must be an absolute http(s) URL.");
+
         RuleFor(x => x.ExpiresInHours)
             .InclusiveBetween(1, 720)
             .When(x => x.ExpiresInHours.HasValue)
