@@ -4,6 +4,7 @@ using KotoDibo.Application.Common.Interfaces;
 using KotoDibo.Application.Features.Bazar.Services;
 using KotoDibo.Application.Features.Contributions.DTOs;
 using KotoDibo.Application.Features.Contributions.Interfaces;
+using KotoDibo.Application.Features.HouseholdBalance.Interfaces;
 using KotoDibo.Domain.Entities;
 using KotoDibo.Domain.Enums;
 using KotoDibo.Domain.Exceptions;
@@ -14,6 +15,7 @@ public class ContributionService : IContributionService
 {
     private readonly IRepository<Contribution> _contributions;
     private readonly IHouseholdAccessService _access;
+    private readonly IHouseholdBalanceService _householdBalanceService;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IValidator<CreateContributionRequest> _createValidator;
     private readonly IValidator<UpdateContributionRequest> _updateValidator;
@@ -21,12 +23,14 @@ public class ContributionService : IContributionService
     public ContributionService(
         IRepository<Contribution> contributions,
         IHouseholdAccessService access,
+        IHouseholdBalanceService householdBalanceService,
         IDateTimeProvider dateTimeProvider,
         IValidator<CreateContributionRequest> createValidator,
         IValidator<UpdateContributionRequest> updateValidator)
     {
         _contributions = contributions;
         _access = access;
+        _householdBalanceService = householdBalanceService;
         _dateTimeProvider = dateTimeProvider;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
@@ -45,6 +49,16 @@ public class ContributionService : IContributionService
         // user ID.
         await _access.RequireMembershipAsync(householdId, targetUserId, HouseholdPermission.ViewHousehold, cancellationToken);
 
+        var currency = request.Currency.Trim().ToUpperInvariant();
+        var establishedCurrency = await _householdBalanceService.GetEstablishedCurrencyAsync(householdId, cancellationToken);
+        if (establishedCurrency is not null && establishedCurrency != currency)
+        {
+            throw new KotoDibo.Application.Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+            {
+                [nameof(request.Currency)] = [$"This household's transactions are recorded in {establishedCurrency}. Use that currency instead."],
+            });
+        }
+
         var now = _dateTimeProvider.UtcNow;
         var contribution = new Contribution
         {
@@ -53,7 +67,7 @@ public class ContributionService : IContributionService
             CreatedByUserId = callerUserId,
             Date = request.Date,
             Amount = request.Amount,
-            Currency = request.Currency.Trim().ToUpperInvariant(),
+            Currency = currency,
             Notes = request.Notes?.Trim(),
             Status = FinancialEntryStatus.Active,
             CreatedAt = now,

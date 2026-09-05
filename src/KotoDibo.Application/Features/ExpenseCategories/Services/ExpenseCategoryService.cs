@@ -32,7 +32,18 @@ public class ExpenseCategoryService : IExpenseCategoryService
 
         if (request.ParentCategoryId is not null)
         {
-            await RequireVisibleAsync(userId, request.ParentCategoryId, cancellationToken);
+            var parent = await RequireVisibleAsync(userId, request.ParentCategoryId, cancellationToken);
+
+            // ExpenseCategory only models one level of subcategory nesting (see its own doc
+            // comment) — nothing else in the system (budget allocations, dashboards) expects or
+            // renders a deeper chain, so a subcategory can't itself become a parent.
+            if (parent.ParentCategoryId is not null)
+            {
+                throw new KotoDibo.Application.Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+                {
+                    [nameof(request.ParentCategoryId)] = ["A subcategory cannot itself be used as a parent category (only one level of nesting is supported)."],
+                });
+            }
         }
 
         var name = request.Name.Trim();

@@ -39,6 +39,9 @@ public static class ServiceCollectionExtensions
 
         services.AddOptions<InviteSettings>()
             .Bind(configuration.GetSection(InviteSettings.SectionName))
+            // Shares Cors:AllowedOrigins as the trusted-frontend allow-list for invite BaseUrl
+            // (see AllowedBaseUrls' doc comment) rather than a second, separately-maintained list.
+            .Configure(s => s.AllowedBaseUrls = configuration.GetSection("Cors:AllowedOrigins").Get<List<string>>() ?? [])
             .ValidateOnStart();
         services.AddSingleton<IInviteSettings>(sp => sp.GetRequiredService<IOptions<InviteSettings>>().Value);
 

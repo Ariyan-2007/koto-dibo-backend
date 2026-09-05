@@ -144,4 +144,20 @@ public class HouseholdBalanceService : IHouseholdBalanceService
 
         return HouseholdBalanceCalculator.Calculate(contributions, purchases);
     }
+
+    public async Task<string?> GetEstablishedCurrencyAsync(string householdId, CancellationToken cancellationToken = default)
+    {
+        var contribution = await _contributions.FindOneAsync(
+            c => c.HouseholdId == householdId && c.Status == FinancialEntryStatus.Active,
+            cancellationToken);
+        if (contribution is not null)
+        {
+            return contribution.Currency;
+        }
+
+        var purchase = await _purchases.FindOneAsync(
+            p => p.HouseholdId == householdId && p.Status == FinancialEntryStatus.Active,
+            cancellationToken);
+        return purchase?.Currency;
+    }
 }

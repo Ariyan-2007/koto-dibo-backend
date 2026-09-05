@@ -10,6 +10,7 @@ public enum HouseholdPermission
     AddMember,
     RemoveMember,
     UpdateMemberRole,
+    TransferOwnership,
     LeaveHousehold,
 
     AddBazarPurchase,

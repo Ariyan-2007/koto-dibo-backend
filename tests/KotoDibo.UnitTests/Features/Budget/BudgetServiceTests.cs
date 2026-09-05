@@ -122,6 +122,24 @@ public class BudgetServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_duplicateCategoryId_ThrowsValidationExceptionBeforeAnyWrite()
+    {
+        var request = ValidRequest() with
+        {
+            Categories =
+            [
+                new CreateBudgetCategoryInput { CategoryId = "cat-food", PlannedAmount = 20000m },
+                new CreateBudgetCategoryInput { CategoryId = "cat-food", PlannedAmount = 5000m },
+            ],
+        };
+
+        var act = () => _sut.CreateAsync("user-1", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+        _budgets.Verify(x => x.AddAsync(It.IsAny<BudgetEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task GetByIdAsync_throws_when_budget_belongs_to_another_user()
     {
         var budget = new BudgetEntity { Id = "budget-1", UserId = "user-1", Name = "X", StartDate = new DateOnly(2026, 1, 1), EndDate = new DateOnly(2026, 1, 31) };

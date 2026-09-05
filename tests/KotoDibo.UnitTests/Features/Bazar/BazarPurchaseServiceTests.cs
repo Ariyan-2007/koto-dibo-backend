@@ -169,6 +169,24 @@ public class BazarPurchaseServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_CurrencyMismatchesHouseholdsEstablishedCurrency_ThrowsValidationException()
+    {
+        GivenMembership(Membership(HouseholdRole.Member, "member-1"));
+        _householdBalanceService.Setup(x => x.GetEstablishedCurrencyAsync("household-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("BDT");
+
+        var act = () => _sut.CreateAsync("household-1", "member-1", "member-1", new CreateBazarPurchaseRequest
+        {
+            Date = Today,
+            Amount = 100m,
+            Currency = "USD",
+        });
+
+        await act.Should().ThrowAsync<ValidationException>();
+        _purchases.Verify(x => x.AddAsync(It.IsAny<BazarPurchase>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateAsync_ByViewer_ThrowsForbidden()
     {
         GivenMembership(Membership(HouseholdRole.Viewer, "viewer-1"));

@@ -55,6 +55,18 @@ public class ExpenseCategoryServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_rejects_subcategory_of_a_subcategory()
+    {
+        _categories.Setup(x => x.GetByIdAsync("child-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExpenseCategory { Id = "child-1", UserId = null, ParentCategoryId = "parent-1", Name = "Groceries", IsActive = true });
+
+        var act = () => _sut.CreateAsync("user-1", new CreateExpenseCategoryRequest { Name = "Organic Groceries", ParentCategoryId = "child-1" }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ValidationException>();
+        _categories.Verify(x => x.AddAsync(It.IsAny<ExpenseCategory>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RequireVisibleAsync_allows_system_default_category()
     {
         _categories.Setup(x => x.GetByIdAsync("sys-1", It.IsAny<CancellationToken>()))

@@ -62,6 +62,8 @@ public class HouseholdInviteService : IHouseholdInviteService
             ?? throw new NotFoundException("Household", householdId);
         RequireActive(household);
 
+        RequireTrustedBaseUrl(request.BaseUrl);
+
         var role = Enum.Parse<HouseholdRole>(request.Role, ignoreCase: true);
         var email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToLowerInvariant();
 
@@ -280,6 +282,26 @@ public class HouseholdInviteService : IHouseholdInviteService
         if (household.Status != HouseholdStatus.Active)
         {
             throw new DomainException("This household is archived and no longer accepts membership changes.");
+        }
+    }
+
+    // BaseUrl is caller-supplied and gets emailed out and QR-encoded under a trusted-looking
+    // "invited to join ... on Koto Dibo" message — without pinning it to a known frontend origin,
+    // any member with AddMember permission could turn the server into a phishing-link sender.
+    private void RequireTrustedBaseUrl(string baseUrl)
+    {
+        var requestedOrigin = new Uri(baseUrl, UriKind.Absolute).GetLeftPart(UriPartial.Authority);
+
+        var isTrusted = _inviteSettings.AllowedBaseUrls.Any(allowed =>
+            Uri.TryCreate(allowed, UriKind.Absolute, out var allowedUri)
+            && string.Equals(allowedUri.GetLeftPart(UriPartial.Authority), requestedOrigin, StringComparison.OrdinalIgnoreCase));
+
+        if (!isTrusted)
+        {
+            throw new KotoDibo.Application.Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+            {
+                [nameof(CreateHouseholdInviteRequest.BaseUrl)] = ["BaseUrl must match a recognized Koto Dibo frontend origin."],
+            });
         }
     }
 

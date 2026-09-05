@@ -55,6 +55,7 @@ public class BazarPurchaseService : IBazarPurchaseService
 
         var fundingSource = ParseFundingSource(request.FundingSource);
         var currency = request.Currency.Trim().ToUpperInvariant();
+        await RequireConsistentCurrencyAsync(householdId, currency, nameof(request.Currency), cancellationToken);
 
         if (fundingSource == BazarFundingSource.HouseholdFund)
         {
@@ -225,6 +226,21 @@ public class BazarPurchaseService : IBazarPurchaseService
             await _purchases.DeleteAsync(purchase.Id, ct);
             return true;
         }, cancellationToken);
+    }
+
+    // Every active Contribution/BazarPurchase in a household is summed together as if it were the
+    // same money (see HouseholdBalanceCalculator) — a mismatched currency on a new entry would
+    // silently corrupt that total, so new entries must agree with whatever currency the household
+    // has already established. Only checked on create: an existing entry's own currency was valid
+    // when it was written, and re-deriving "everyone else's currency" on edit would have to exclude
+    // the row (and, for a Bazar purchase, its own mirrored Contribution) from itself.
+    private async Task RequireConsistentCurrencyAsync(string householdId, string currency, string field, CancellationToken cancellationToken)
+    {
+        var establishedCurrency = await _householdBalanceService.GetEstablishedCurrencyAsync(householdId, cancellationToken);
+        if (establishedCurrency is not null && establishedCurrency != currency)
+        {
+            throw FieldValidationException(field, $"This household's transactions are recorded in {establishedCurrency}. Use that currency instead.");
+        }
     }
 
     private async Task RequireSufficientBalanceAsync(string householdId, decimal amount, string currency, CancellationToken cancellationToken)

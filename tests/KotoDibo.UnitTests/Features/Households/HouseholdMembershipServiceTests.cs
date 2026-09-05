@@ -8,6 +8,7 @@ using KotoDibo.Application.Features.Households.Validators;
 using KotoDibo.Domain.Entities;
 using KotoDibo.Domain.Enums;
 using KotoDibo.Domain.Exceptions;
+using KotoDibo.UnitTests.TestHelpers;
 using Moq;
 
 namespace KotoDibo.UnitTests.Features.Households;
@@ -40,8 +41,10 @@ public class HouseholdMembershipServiceTests
             _users.Object,
             access,
             _dateTimeProvider.Object,
+            new PassthroughUnitOfWork(),
             new AddMemberRequestValidator(),
-            new UpdateMemberRoleRequestValidator());
+            new UpdateMemberRoleRequestValidator(),
+            new TransferOwnershipRequestValidator());
     }
 
     private static Household ActiveHousehold() => new()
@@ -189,6 +192,52 @@ public class HouseholdMembershipServiceTests
         var act = () => _sut.UpdateMemberRoleAsync("household-1", "owner-1", "owner-2", new UpdateMemberRoleRequest { Role = "Manager" }, CancellationToken.None);
 
         await act.Should().ThrowAsync<DomainException>();
+    }
+
+    [Fact]
+    public async Task TransferOwnershipAsync_ToActiveMember_PromotesTargetAndDemotesCaller()
+    {
+        GivenMemberships(Membership(HouseholdRole.Owner, "owner-1"), Membership(HouseholdRole.Member, "member-1"));
+        _users.Setup(x => x.GetByIdAsync("member-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ExistingUser("member-1", "member@example.com"));
+
+        var result = await _sut.TransferOwnershipAsync("household-1", "owner-1", new TransferOwnershipRequest { NewOwnerUserId = "member-1" }, CancellationToken.None);
+
+        result.UserId.Should().Be("member-1");
+        result.Role.Should().Be(nameof(HouseholdRole.Owner));
+        _households.Verify(x => x.UpdateAsync(It.Is<Household>(h => h.OwnerUserId == "member-1"), It.IsAny<CancellationToken>()), Times.Once);
+        _memberships.Verify(x => x.UpdateAsync(It.Is<HouseholdMembership>(m => m.UserId == "member-1" && m.Role == HouseholdRole.Owner), It.IsAny<CancellationToken>()), Times.Once);
+        _memberships.Verify(x => x.UpdateAsync(It.Is<HouseholdMembership>(m => m.UserId == "owner-1" && m.Role == HouseholdRole.Manager), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TransferOwnershipAsync_ToSelf_ThrowsDomainException()
+    {
+        GivenCallerMembership(Membership(HouseholdRole.Owner, "owner-1"));
+
+        var act = () => _sut.TransferOwnershipAsync("household-1", "owner-1", new TransferOwnershipRequest { NewOwnerUserId = "owner-1" }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<DomainException>();
+    }
+
+    [Fact]
+    public async Task TransferOwnershipAsync_ByNonOwner_ThrowsForbidden()
+    {
+        GivenCallerMembership(Membership(HouseholdRole.Manager, "manager-1"));
+
+        var act = () => _sut.TransferOwnershipAsync("household-1", "manager-1", new TransferOwnershipRequest { NewOwnerUserId = "member-1" }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>();
+    }
+
+    [Fact]
+    public async Task TransferOwnershipAsync_TargetNotActiveMember_ThrowsNotFound()
+    {
+        GivenCallerMembership(Membership(HouseholdRole.Owner, "owner-1"));
+
+        var act = () => _sut.TransferOwnershipAsync("household-1", "owner-1", new TransferOwnershipRequest { NewOwnerUserId = "not-a-member" }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<NotFoundException>();
     }
 
     [Fact]

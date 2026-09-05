@@ -10,7 +10,10 @@ public class CreateBudgetRequestValidator : AbstractValidator<CreateBudgetReques
     {
         RuleFor(x => x.Name).NotEmpty().MaximumLength(150);
         RuleFor(x => x.Description).MaximumLength(1000);
-        RuleFor(x => x.Currency).MaximumLength(3).When(x => x.Currency is not null);
+        RuleFor(x => x.Currency)
+            .Matches("^[A-Za-z]{3}$")
+            .WithMessage("Currency must be a 3-letter ISO 4217 code.")
+            .When(x => !string.IsNullOrWhiteSpace(x.Currency));
         RuleFor(x => x.PeriodType)
             .NotEmpty()
             .Must(v => Enum.TryParse<BudgetPeriodType>(v, ignoreCase: true, out _))
@@ -32,5 +35,13 @@ public class CreateBudgetRequestValidator : AbstractValidator<CreateBudgetReques
             category.RuleFor(c => c.PlannedAmount).GreaterThanOrEqualTo(0);
             category.RuleFor(c => c.Notes).MaximumLength(500);
         });
+
+        // BudgetCategoryAllocation has a unique (BudgetId, CategoryId) index — a duplicate here
+        // would insert the budget and the first allocation, then fail partway through the rest
+        // with a raw Conflict instead of rejecting the whole request upfront.
+        RuleFor(x => x.Categories)
+            .Must(categories => categories!.Select(c => c.CategoryId).Distinct().Count() == categories!.Count)
+            .WithMessage("Categories cannot contain duplicate CategoryId entries.")
+            .When(x => x.Categories is { Count: > 0 });
     }
 }

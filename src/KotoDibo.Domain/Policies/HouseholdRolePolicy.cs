@@ -17,6 +17,7 @@ public static class HouseholdRolePolicy
             HouseholdPermission.ArchiveHousehold, HouseholdPermission.RestoreHousehold,
             HouseholdPermission.ViewMembers, HouseholdPermission.AddMember,
             HouseholdPermission.RemoveMember, HouseholdPermission.UpdateMemberRole,
+            HouseholdPermission.TransferOwnership,
             HouseholdPermission.LeaveHousehold,
             HouseholdPermission.AddBazarPurchase, HouseholdPermission.AddAnyBazarPurchase, HouseholdPermission.ViewBazar,
             HouseholdPermission.UpdateBazarPurchase, HouseholdPermission.DeleteBazarPurchase,

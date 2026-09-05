@@ -16,8 +16,10 @@ public class HouseholdMembershipService : IHouseholdMembershipService
     private readonly IRepository<User> _users;
     private readonly IHouseholdAccessService _access;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IValidator<AddMemberRequest> _addMemberValidator;
     private readonly IValidator<UpdateMemberRoleRequest> _updateRoleValidator;
+    private readonly IValidator<TransferOwnershipRequest> _transferOwnershipValidator;
 
     public HouseholdMembershipService(
         IRepository<Household> households,
@@ -25,16 +27,20 @@ public class HouseholdMembershipService : IHouseholdMembershipService
         IRepository<User> users,
         IHouseholdAccessService access,
         IDateTimeProvider dateTimeProvider,
+        IUnitOfWork unitOfWork,
         IValidator<AddMemberRequest> addMemberValidator,
-        IValidator<UpdateMemberRoleRequest> updateRoleValidator)
+        IValidator<UpdateMemberRoleRequest> updateRoleValidator,
+        IValidator<TransferOwnershipRequest> transferOwnershipValidator)
     {
         _households = households;
         _memberships = memberships;
         _users = users;
         _access = access;
         _dateTimeProvider = dateTimeProvider;
+        _unitOfWork = unitOfWork;
         _addMemberValidator = addMemberValidator;
         _updateRoleValidator = updateRoleValidator;
+        _transferOwnershipValidator = transferOwnershipValidator;
     }
 
     public async Task<IReadOnlyList<HouseholdMemberDto>> GetMembersAsync(string householdId, string callerUserId, CancellationToken cancellationToken = default)
@@ -164,6 +170,61 @@ public class HouseholdMembershipService : IHouseholdMembershipService
         var targetUser = await _users.GetByIdAsync(targetUserId, cancellationToken)
             ?? throw new NotFoundException("User", targetUserId);
         return ToDto(targetMembership, targetUser);
+    }
+
+    public async Task<HouseholdMemberDto> TransferOwnershipAsync(string householdId, string callerUserId, TransferOwnershipRequest request, CancellationToken cancellationToken = default)
+    {
+        await _transferOwnershipValidator.ValidateAndThrowAsync(request, cancellationToken);
+
+        var callerMembership = await _access.RequireMembershipAsync(householdId, callerUserId, HouseholdPermission.TransferOwnership, cancellationToken);
+
+        var household = await _households.GetByIdAsync(householdId, cancellationToken)
+            ?? throw new NotFoundException("Household", householdId);
+        RequireActive(household);
+
+        if (request.NewOwnerUserId == callerUserId)
+        {
+            throw new DomainException("You are already the owner of this household.");
+        }
+
+        // RequireMembershipAsync only ever grants TransferOwnership to the Owner role, so this
+        // caller is guaranteed to be the current owner — but guard it anyway rather than trusting
+        // that invariant silently, since demoting the wrong membership below would be destructive.
+        if (callerMembership.Role != HouseholdRole.Owner)
+        {
+            throw new ForbiddenException("Only the current household owner can transfer ownership.");
+        }
+
+        var targetMembership = await _memberships.FindOneAsync(
+            m => m.HouseholdId == householdId && m.UserId == request.NewOwnerUserId && m.Status == HouseholdMembershipStatus.Active,
+            cancellationToken) ?? throw new NotFoundException("HouseholdMembership", request.NewOwnerUserId);
+
+        var targetUser = await _users.GetByIdAsync(request.NewOwnerUserId, cancellationToken)
+            ?? throw new NotFoundException("User", request.NewOwnerUserId);
+
+        var now = _dateTimeProvider.UtcNow;
+
+        // Household.OwnerUserId, the outgoing owner's demotion, and the incoming owner's promotion
+        // must all land together — a crash partway through would otherwise leave either two owners
+        // or none.
+        return await _unitOfWork.ExecuteAsync(async ct =>
+        {
+            household.OwnerUserId = targetMembership.UserId;
+            household.UpdatedAt = now;
+            await _households.UpdateAsync(household, ct);
+
+            targetMembership.Role = HouseholdRole.Owner;
+            targetMembership.UpdatedAt = now;
+            await _memberships.UpdateAsync(targetMembership, ct);
+
+            // The outgoing owner keeps their place in the household as a Manager rather than being
+            // removed or left without elevated access.
+            callerMembership.Role = HouseholdRole.Manager;
+            callerMembership.UpdatedAt = now;
+            await _memberships.UpdateAsync(callerMembership, ct);
+
+            return ToDto(targetMembership, targetUser);
+        }, cancellationToken);
     }
 
     public async Task LeaveAsync(string householdId, string callerUserId, CancellationToken cancellationToken = default)

@@ -133,6 +133,29 @@ public class BillSplitServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_DuplicateMemberInputUserId_ThrowsValidationException()
+    {
+        GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
+        GivenActiveMembers(Membership(HouseholdRole.Member, "ariyan"), Membership(HouseholdRole.Member, "rihan"));
+        GivenTariffConfig(BangladeshLikeTariff());
+
+        var act = () => _sut.CreateAsync("household-1", "ariyan", new CreateBillSplitRequest
+        {
+            Title = "January electricity",
+            SplitMethod = "TariffMetered",
+            PeriodFrom = PeriodFrom,
+            PeriodTo = PeriodTo,
+            Currency = "BDT",
+            TariffCountry = "BD",
+            MainMeterUsage = 500m,
+            MemberInputs = [new BillSplitMemberInputDto { UserId = "ariyan", Value = 200m }, new BillSplitMemberInputDto { UserId = "ariyan", Value = 150m }],
+        });
+
+        await act.Should().ThrowAsync<FluentValidation.ValidationException>();
+        _billSplits.Verify(x => x.AddAsync(It.IsAny<BillSplitEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateAsync_TariffMeteredWithFixedCharges_PersistsThem()
     {
         GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
@@ -379,6 +402,34 @@ public class BillSplitServiceTests
         var result = await _sut.UpdateAsync("household-1", "ariyan", "billsplit-1", new UpdateBillSplitRequest { Title = "Updated title" }, CancellationToken.None);
 
         result.Title.Should().Be("Updated title");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WeightedSplitClearingMemberInputs_ThrowsValidationException()
+    {
+        var entity = new BillSplitEntity
+        {
+            Id = "billsplit-1",
+            HouseholdId = "household-1",
+            CreatedByUserId = "ariyan",
+            Title = "Rent",
+            SplitMethod = BillSplitMethod.WeightedSplit,
+            PeriodFrom = PeriodFrom,
+            PeriodTo = PeriodTo,
+            Currency = "BDT",
+            TotalAmount = 1000m,
+            MemberInputs = [new BillSplitMemberInput { UserId = "ariyan", Value = 1m }, new BillSplitMemberInput { UserId = "rihan", Value = 1m }],
+            Status = FinancialEntryStatus.Active,
+            CreatedAt = Now,
+            UpdatedAt = Now,
+        };
+        GivenExistingBillSplit(entity);
+        GivenCallerMembership(Membership(HouseholdRole.Member, "ariyan"));
+
+        var act = () => _sut.UpdateAsync("household-1", "ariyan", "billsplit-1", new UpdateBillSplitRequest { MemberInputs = [] }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ValidationException>();
+        _billSplits.Verify(x => x.UpdateAsync(It.IsAny<BillSplitEntity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

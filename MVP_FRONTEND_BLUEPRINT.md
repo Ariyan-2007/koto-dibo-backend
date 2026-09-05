@@ -124,6 +124,7 @@ Everything else is household-scoped, so this has to exist before any other modul
 | POST | `/api/households/{id}/members` | `{ Email, Role }` | `HouseholdMemberDto` |
 | DELETE | `/api/households/{id}/members/{userId}` | — | `204` |
 | PATCH | `/api/households/{id}/members/{userId}/role` | `{ Role }` | `HouseholdMemberDto` |
+| POST | `/api/households/{id}/transfer-ownership` | `{ NewOwnerUserId }` | `HouseholdMemberDto` (the new owner) |
 | POST | `/api/households/{id}/leave` | — | `204` |
 
 `HouseholdDto`: `{ Id, Name, Description?, Type?, Status, OwnerUserId, MemberCount, CallerRole, CreatedAt, UpdatedAt, ArchivedAt? }`.
@@ -131,9 +132,9 @@ Everything else is household-scoped, so this has to exist before any other modul
 
 Notes:
 - **`POST .../members` (direct add) still requires an existing account** with that exact `Email`, or it 400s ("No account found with this email") — this is the "I know they're already on Koto Dibo" shortcut. For anyone else — the far more common case — use the **invite flow** in §1.1 instead; it's the one to build the primary "add someone to my household" UI against. Copy for the direct-add form should say "add an existing Koto Dibo user by email," not "invite by email."
-- The Owner role can't be removed or role-changed via these endpoints (`DomainException` if attempted) — ownership transfer isn't implemented yet either, so hide "remove"/"change role" controls entirely for the Owner row.
+- The Owner role can't be removed or role-changed via `PATCH .../role` (`DomainException` if attempted) — hide "remove"/"change role" controls entirely for the Owner row; use the dedicated **transfer ownership** action instead (Owner-only, target must be an existing active member — `NewOwnerUserId`, not email). It atomically promotes the target to Owner and demotes the caller to Manager, and also updates `HouseholdDto.OwnerUserId`. 400s (`DomainException`) if the target is the caller themself; 404 if the target isn't an active member; 403 if the caller isn't the current Owner.
 - A Manager can't remove another Manager (only the Owner can) — disable that action client-side for Manager-viewing-Manager rows.
-- If the Owner leaves while other active members remain, the call 400s ("Transfer ownership first") — if the Owner is the *last* active member, leaving auto-archives the household instead. Surface both outcomes distinctly in the confirmation dialog copy.
+- If the Owner leaves while other active members remain, the call 400s ("Transfer ownership first") — surface a "Transfer ownership" CTA in that error state rather than a dead end. If the Owner is the *last* active member, leaving auto-archives the household instead. Surface both outcomes distinctly in the confirmation dialog copy.
 - Archiving a household should be a confirm-with-consequences dialog (blocks membership changes until restored, per `RequireActive` checks across every membership mutation).
 
 ### 1.1 Household Invites (QR + code) — replaces "just adding an email"
@@ -143,19 +144,21 @@ Notes:
 **The two flows this API supports, both converging on the same `Accept` call:**
 
 1. **Code, shared by the inviter through any channel.** Owner/Manager opens "Invite member," optionally types an email (for their own reference + an auto-sent email if provided), picks a role, and calls `Create`. The response has a short `Code` (e.g. `7K3PQXR9`) — show it big and copyable. The inviter sends it however they like (chat, SMS, verbally). The invitee opens the app, goes to "Join a household," types the code, and calls `Accept`.
-2. **QR, scanned.** Same `Create` call also returns `QrCodeUrl` (a PNG hosted on Cloudflare R2/CDN — just an `<img src>`, no client-side QR rendering needed) and `InviteLink` (what the QR encodes: `{Invites:BaseUrl}/{code}`, e.g. `https://koto-dibo.ariyan.app/invites/7K3PQXR9`). Show the QR full-screen for the invitee to scan with their phone camera. Scanning opens that link in a browser/the installed PWA; the frontend route at `/invites/:code` should immediately resolve the code (§ below) and, once the user is authenticated, offer one-tap Accept — this is the "auto joins" path from the product spec, though UX-wise it should still be one confirming tap ("Join *The Bachelor House*?"), not silent, so a stray scan can't add someone to a household without them noticing.
+2. **QR, scanned.** Same `Create` call also returns `QrCodeUrl` (a PNG hosted on Cloudflare R2/CDN — just an `<img src>`, no client-side QR rendering needed) and `InviteLink` (what the QR encodes: `{BaseUrl}/{code}`, e.g. `https://koto-dibo.ariyan.app/invites/7K3PQXR9`). Show the QR full-screen for the invitee to scan with their phone camera. Scanning opens that link in a browser/the installed PWA; the frontend route at `/invites/:code` should immediately resolve the code (§ below) and, once the user is authenticated, offer one-tap Accept — this is the "auto joins" path from the product spec, though UX-wise it should still be one confirming tap ("Join *The Bachelor House*?"), not silent, so a stray scan can't add someone to a household without them noticing.
 
 Both paths end at the same two endpoints — build one "resolve + confirm + accept" screen and route both the manually-typed-code flow and the `/invites/:code` deep link into it.
 
 | Method | Path | Auth | Request | Response |
 |---|---|---|---|---|
-| POST | `/api/households/{id}/invites` | Owner/Manager | `{ Email?, Role, ExpiresInHours? }` | `HouseholdInviteDto` |
+| POST | `/api/households/{id}/invites` | Owner/Manager | `{ Email?, Role, BaseUrl, ExpiresInHours? }` | `HouseholdInviteDto` |
 | GET | `/api/households/{id}/invites` | Owner/Manager | — | `HouseholdInviteDto[]` (pending only) |
 | POST | `/api/households/{id}/invites/{inviteId}/revoke` | Owner/Manager | — | `204` |
 | GET | `/api/invites/{code}` | Any authenticated user | — | `InvitePreviewDto` |
 | POST | `/api/invites/{code}/accept` | Any authenticated user | — | `AcceptInviteResultDto` |
 
-`HouseholdInviteDto`: `{ Id, HouseholdId, InvitedByUserId, Code, Role, Email?, Status, InviteLink, QrCodeUrl, ExpiresAt, CreatedAt }`. `Status` is `Pending | Accepted | Revoked | Expired`; `Role` excludes `Owner` (validation rejects it — ownership isn't transferable via invite). `ExpiresInHours` defaults to 168 (7 days) and is capped at 720 (30 days) server-side — no need to validate the cap client-side, but do surface the default in the create form.
+`HouseholdInviteDto`: `{ Id, HouseholdId, InvitedByUserId, Code, Role, Email?, Status, InviteLink, QrCodeUrl, ExpiresAt, CreatedAt }`. `Status` is `Pending | Accepted | Revoked | Expired`; `Role` excludes `Owner` (validation rejects it — ownership isn't transferable via invite, only via `POST .../transfer-ownership`, see §1). `ExpiresInHours` defaults to 168 (7 days) and is capped at 720 (30 days) server-side — no need to validate the cap client-side, but do surface the default in the create form.
+
+`BaseUrl` **must be one of the app's own deployed origins** (the same list as `Cors:AllowedOrigins` server-side, e.g. `https://koto-dibo.ariyan.app`) — this isn't a free-form "deep-link base," it's pinned so the server can't be made to email/QR-encode an attacker's link under a trusted-looking "invited to join ... on Koto Dibo" message. Hardcode/derive it from the frontend's own known origin rather than accepting it from anywhere user-influenced; an unrecognized origin 400s (`BaseUrl must match a recognized Koto Dibo frontend origin.`).
 
 `InvitePreviewDto`: `{ Code, HouseholdId, HouseholdName, Role, InvitedByName, Status, ExpiresAt, CallerIsAlreadyMember }`. Call this from the `/invites/:code` route (and from the "Join by code" form after the user types a code, before they commit) to render "**{InvitedByName}** invited you to join **{HouseholdName}** as a **{Role}**" plus an Accept button — *don't* call Accept sight-unseen from a raw deep-link open. `Status` here reflects the invite's *effective* status (a `Pending` invite past its `ExpiresAt` previews as `Expired` even though nothing was written yet) — branch UI copy on it: `Accepted` → "already used," `Revoked` → "no longer valid," `Expired` → "expired, ask for a new one," `Pending` with `CallerIsAlreadyMember: true` → "you're already in, go to the household" (no Accept button), `Pending` otherwise → show the Accept button.
 

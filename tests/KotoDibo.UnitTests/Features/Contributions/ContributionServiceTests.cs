@@ -4,6 +4,7 @@ using KotoDibo.Application.Common.Interfaces;
 using KotoDibo.Application.Features.Contributions.DTOs;
 using KotoDibo.Application.Features.Contributions.Services;
 using KotoDibo.Application.Features.Contributions.Validators;
+using KotoDibo.Application.Features.HouseholdBalance.Interfaces;
 using KotoDibo.Application.Features.Households.Services;
 using KotoDibo.Domain.Entities;
 using KotoDibo.Domain.Enums;
@@ -19,6 +20,7 @@ public class ContributionServiceTests
 
     private readonly Mock<IRepository<Contribution>> _contributions = new();
     private readonly Mock<IRepository<HouseholdMembership>> _memberships = new();
+    private readonly Mock<IHouseholdBalanceService> _householdBalanceService = new();
     private readonly Mock<IDateTimeProvider> _dateTimeProvider = new();
 
     private readonly ContributionService _sut;
@@ -29,12 +31,17 @@ public class ContributionServiceTests
         _contributions.Setup(x => x.AddAsync(It.IsAny<Contribution>(), It.IsAny<CancellationToken>()))
             .Callback<Contribution, CancellationToken>((c, _) => c.Id = "contribution-1")
             .ReturnsAsync((Contribution c, CancellationToken _) => c);
+        // No established currency by default (no prior active entries) — CreateAsync accepts
+        // whatever currency the test passes in unless a test opts into a specific value.
+        _householdBalanceService.Setup(x => x.GetEstablishedCurrencyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
 
         var access = new HouseholdAccessService(_memberships.Object);
 
         _sut = new ContributionService(
             _contributions.Object,
             access,
+            _householdBalanceService.Object,
             _dateTimeProvider.Object,
             new CreateContributionRequestValidator(),
             new UpdateContributionRequestValidator());
@@ -136,6 +143,24 @@ public class ContributionServiceTests
         });
 
         await act.Should().ThrowAsync<ValidationException>();
+    }
+
+    [Fact]
+    public async Task CreateAsync_CurrencyMismatchesHouseholdsEstablishedCurrency_ThrowsValidationException()
+    {
+        GivenMembership(Membership(HouseholdRole.Member, "member-1"));
+        _householdBalanceService.Setup(x => x.GetEstablishedCurrencyAsync("household-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("BDT");
+
+        var act = () => _sut.CreateAsync("household-1", "member-1", "member-1", new CreateContributionRequest
+        {
+            Date = Today,
+            Amount = 100m,
+            Currency = "USD",
+        });
+
+        await act.Should().ThrowAsync<ValidationException>();
+        _contributions.Verify(x => x.AddAsync(It.IsAny<Contribution>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

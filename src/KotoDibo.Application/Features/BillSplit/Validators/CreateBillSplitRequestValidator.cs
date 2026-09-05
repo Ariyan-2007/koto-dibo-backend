@@ -28,6 +28,14 @@ public class CreateBillSplitRequestValidator : AbstractValidator<CreateBillSplit
 
         RuleFor(x => x.Notes).MaximumLength(500);
 
+        // Settlement computes with `entity.MemberInputs.ToDictionary(i => i.UserId, ...)` (see
+        // BillSplitService) — a duplicate UserId would throw an unhandled ArgumentException there
+        // instead of failing here with a proper 400.
+        RuleFor(x => x.MemberInputs)
+            .Must(inputs => inputs.Select(i => i.UserId).Distinct().Count() == inputs.Count)
+            .WithMessage("MemberInputs cannot contain duplicate UserId entries.")
+            .When(x => x.MemberInputs.Count > 0);
+
         When(x => IsMethod(x.SplitMethod, BillSplitMethod.TariffMetered), () =>
         {
             RuleFor(x => x.TariffCountry).NotEmpty().WithMessage("TariffCountry is required for TariffMetered bill splits.");

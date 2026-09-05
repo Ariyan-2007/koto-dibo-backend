@@ -21,6 +21,13 @@ public class UpdateBillSplitRequestValidator : AbstractValidator<UpdateBillSplit
             input.RuleFor(i => i.Value).GreaterThanOrEqualTo(0m);
         }).When(x => x.MemberInputs is not null);
 
+        // See CreateBillSplitRequestValidator: a duplicate UserId would otherwise crash
+        // BillSplitService's settlement calculation with an unhandled ArgumentException.
+        RuleFor(x => x.MemberInputs)
+            .Must(inputs => inputs!.Select(i => i.UserId).Distinct().Count() == inputs!.Count)
+            .WithMessage("MemberInputs cannot contain duplicate UserId entries.")
+            .When(x => x.MemberInputs is not null);
+
         RuleForEach(x => x.FixedCharges).ChildRules(charge =>
         {
             charge.RuleFor(c => c.Label).NotEmpty().MaximumLength(100);

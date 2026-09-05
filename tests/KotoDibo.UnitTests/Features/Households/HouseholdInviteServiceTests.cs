@@ -34,6 +34,7 @@ public class HouseholdInviteServiceTests
         _dateTimeProvider.Setup(x => x.UtcNow).Returns(Now);
         _inviteSettings.Setup(x => x.DefaultExpiry).Returns(TimeSpan.FromHours(168));
         _inviteSettings.Setup(x => x.MaxExpiry).Returns(TimeSpan.FromHours(720));
+        _inviteSettings.Setup(x => x.AllowedBaseUrls).Returns(["https://koto-dibo.example"]);
 
         _households.Setup(x => x.GetByIdAsync("household-1", It.IsAny<CancellationToken>())).ReturnsAsync(ActiveHousehold());
         _qrCodeService.Setup(x => x.GeneratePng(It.IsAny<string>())).Returns([1, 2, 3]);
@@ -141,6 +142,17 @@ public class HouseholdInviteServiceTests
         await _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Member", Email = "friend@example.com", BaseUrl = "https://koto-dibo.example/invites" });
 
         _emailSender.Verify(x => x.SendAsync("friend@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateAsync_UntrustedBaseUrl_ThrowsValidationException()
+    {
+        GivenMemberships(Membership(HouseholdRole.Owner, "owner-1"));
+
+        var act = () => _sut.CreateAsync("household-1", "owner-1", new CreateHouseholdInviteRequest { Role = "Member", BaseUrl = "https://evil.example/invites" });
+
+        await act.Should().ThrowAsync<ValidationException>();
+        _invites.Verify(x => x.AddAsync(It.IsAny<HouseholdInvite>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

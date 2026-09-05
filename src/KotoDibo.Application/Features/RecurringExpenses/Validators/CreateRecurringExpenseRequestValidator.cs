@@ -9,7 +9,10 @@ public class CreateRecurringExpenseRequestValidator : AbstractValidator<CreateRe
     public CreateRecurringExpenseRequestValidator()
     {
         RuleFor(x => x.Amount).GreaterThan(0);
-        RuleFor(x => x.Currency).MaximumLength(3).When(x => x.Currency is not null);
+        RuleFor(x => x.Currency)
+            .Matches("^[A-Za-z]{3}$")
+            .WithMessage("Currency must be a 3-letter ISO 4217 code.")
+            .When(x => !string.IsNullOrWhiteSpace(x.Currency));
         RuleFor(x => x.CategoryId).NotEmpty();
         RuleFor(x => x.Merchant).MaximumLength(150);
         RuleFor(x => x.Description).MaximumLength(500);

@@ -178,6 +178,18 @@ public class BillSplitService : IBillSplitService
 
             if (request.MemberInputs is not null)
             {
+                // Unlike TariffMetered (where an empty MemberInputs just folds everything into the
+                // shared bucket), WeightedSplit has no fallback: FairSplitAllocator.ComputeFlatSplit
+                // over an empty weight map settles to nobody owing anything, silently zeroing out a
+                // bill that still has a nonzero TotalAmount.
+                if (entity.SplitMethod == BillSplitMethod.WeightedSplit && request.MemberInputs.Count == 0)
+                {
+                    throw new KotoDibo.Application.Common.Exceptions.ValidationException(new Dictionary<string, string[]>
+                    {
+                        [nameof(UpdateBillSplitRequest.MemberInputs)] = ["At least one member weight is required for WeightedSplit."],
+                    });
+                }
+
                 await RequireActiveMembersAsync(householdId, request.MemberInputs.Select(i => i.UserId), cancellationToken);
                 entity.MemberInputs = request.MemberInputs
                     .Select(i => new KotoDibo.Domain.Entities.BillSplitMemberInput { UserId = i.UserId, Value = i.Value })

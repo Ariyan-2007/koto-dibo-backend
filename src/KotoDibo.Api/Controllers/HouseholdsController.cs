@@ -95,6 +95,13 @@ public class HouseholdsController : ControllerBase
         return Ok(member);
     }
 
+    [HttpPost("{id}/transfer-ownership")]
+    public async Task<ActionResult<HouseholdMemberDto>> TransferOwnership(string id, TransferOwnershipRequest request, CancellationToken cancellationToken)
+    {
+        var member = await _membershipService.TransferOwnershipAsync(id, UserId, request, cancellationToken);
+        return Ok(member);
+    }
+
     [HttpPost("{id}/leave")]
     public async Task<IActionResult> Leave(string id, CancellationToken cancellationToken)
     {
