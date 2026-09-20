@@ -16,15 +16,17 @@ namespace KotoDibo.Domain.Calculations;
 // how a purchase signals "I have a mirrored Contribution to offset" — checking FundingSource alone
 // would miss this. A negative "leftover" correction entry (Amount <= 0) has no mirror and is
 // excluded from both sides, exactly as before.
+//
+// A Withdrawal is cash a member takes back out of the pool, so it is subtracted directly.
 public static class HouseholdBalanceCalculator
 {
-    public static decimal Calculate(IEnumerable<Contribution> activeContributions, IEnumerable<BazarPurchase> activeBazarPurchases)
+    public static decimal Calculate(IEnumerable<Contribution> activeContributions, IEnumerable<BazarPurchase> activeBazarPurchases, IEnumerable<Withdrawal> withdrawals)
     {
         var totalContributions = activeContributions.Sum(c => c.Amount);
         var totalBazarExpense = activeBazarPurchases
             .Where(p => p.FundingSource == BazarFundingSource.HouseholdFund || p.LinkedContributionId is not null)
             .Sum(p => p.Amount);
 
-        return totalContributions - totalBazarExpense;
+        return totalContributions - totalBazarExpense - withdrawals.Sum(w => w.Amount);
     }
 }

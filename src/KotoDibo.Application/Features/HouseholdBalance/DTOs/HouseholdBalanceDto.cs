@@ -8,6 +8,7 @@ public record HouseholdBalanceDto
     public string HouseholdId { get; init; } = string.Empty;
     public decimal TotalContributions { get; init; }
     public decimal TotalSpentFromFund { get; init; }
+    public decimal TotalWithdrawn { get; init; }
     public decimal CurrentBalance { get; init; }
     public string Currency { get; init; } = string.Empty;
     public DateTime AsOf { get; init; }

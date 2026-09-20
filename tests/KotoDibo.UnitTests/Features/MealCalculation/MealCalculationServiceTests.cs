@@ -17,6 +17,7 @@ public class MealCalculationServiceTests
 
     private readonly Mock<IRepository<BazarPurchase>> _purchases = new();
     private readonly Mock<IRepository<Contribution>> _contributions = new();
+    private readonly Mock<IRepository<Withdrawal>> _withdrawals = new();
     private readonly Mock<IRepository<DailyMealEntry>> _mealEntries = new();
     private readonly Mock<IRepository<HouseholdMembership>> _memberships = new();
 
@@ -25,7 +26,7 @@ public class MealCalculationServiceTests
     public MealCalculationServiceTests()
     {
         var access = new HouseholdAccessService(_memberships.Object);
-        _sut = new MealCalculationService(_purchases.Object, _contributions.Object, _mealEntries.Object, access);
+        _sut = new MealCalculationService(_purchases.Object, _contributions.Object, _withdrawals.Object, _mealEntries.Object, access);
 
         _memberships.Setup(x => x.FindOneAsync(It.IsAny<Expression<Func<HouseholdMembership, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HouseholdMembership
@@ -37,6 +38,8 @@ public class MealCalculationServiceTests
                 Status = HouseholdMembershipStatus.Active,
             });
 
+        _withdrawals.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Withdrawal, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
         _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
     }
@@ -100,6 +103,24 @@ public class MealCalculationServiceTests
         result.TotalMealUnits.Should().Be(292m);
         Math.Round(result.MealRate!.Value, 2).Should().Be(58.22m);
         result.Members.Sum(m => m.MealCost).Should().Be(17000m);
+    }
+
+    [Fact]
+    public async Task GetMealRateAsync_Withdrawal_IsDeductedFromMemberContribution()
+    {
+        _purchases.Setup(x => x.FindAsync(It.IsAny<Expression<Func<BazarPurchase, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([ContributionEntry("ariyan", 3000m)]);
+        _withdrawals.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Withdrawal, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Withdrawal { Id = "w-1", HouseholdId = "household-1", WithdrawnByUserId = "ariyan", Date = From, Amount = 500m, Currency = "BDT" }]);
+        _mealEntries.Setup(x => x.FindAsync(It.IsAny<Expression<Func<DailyMealEntry, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        var result = await _sut.GetMealRateAsync("household-1", "caller-1", From, To);
+
+        result.Members.Single(m => m.UserId == "ariyan").Contribution.Should().Be(2500m);
+        result.TotalContributions.Should().Be(2500m);
     }
 
     [Fact]

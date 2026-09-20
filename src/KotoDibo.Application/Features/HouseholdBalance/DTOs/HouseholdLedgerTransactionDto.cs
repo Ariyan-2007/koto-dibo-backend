@@ -10,15 +10,15 @@ public record HouseholdLedgerTransactionDto
     public string Id { get; init; } = string.Empty;
     public string HouseholdId { get; init; } = string.Empty;
 
-    // "Contribution" or "BazarPurchase".
+    // "Contribution", "BazarPurchase" or "Withdrawal".
     public string EntryType { get; init; } = string.Empty;
 
     // "In" (added to the pool) or "Out" (drawn from it). A personal-pocket Bazar purchase never
     // appears as "Out" here in a way that double-counts — see BalanceImpact.
     public string Direction { get; init; } = string.Empty;
 
-    // The entry's actual effect on CurrentBalance: +Amount for every Contribution, -Amount only for
-    // a Bazar purchase funded from the household pool. A personal-pocket Bazar purchase carries
+    // The entry's actual effect on CurrentBalance: +Amount for every Contribution, -Amount for a
+    // Withdrawal and for a Bazar purchase funded from the household pool. A personal-pocket Bazar purchase carries
     // BalanceImpact 0 here (its own -Amount is offset by its mirrored Contribution's +Amount, which
     // appears as its own separate row) — this field exists so a client can sanity-check
     // CurrentBalance == sum(BalanceImpact) without re-deriving the funding-source rules itself.
@@ -35,7 +35,8 @@ public record HouseholdLedgerTransactionDto
     public string CreatedByUserId { get; init; } = string.Empty;
 
     // BazarFundingSource ("Personal"/"HouseholdFund") for a BazarPurchase row, or
-    // ContributionSourceType ("Manual"/"AutoFromBazar") for a Contribution row.
+    // ContributionSourceType ("Manual"/"AutoFromBazar") for a Contribution row, or "Manual" for a
+    // Withdrawal row.
     public string SourceType { get; init; } = string.Empty;
 
     // The counterpart record's id: a personal-pocket BazarPurchase row's mirrored Contribution id,

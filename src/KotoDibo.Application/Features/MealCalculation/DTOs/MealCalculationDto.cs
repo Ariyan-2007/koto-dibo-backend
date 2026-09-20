@@ -9,6 +9,7 @@ public record MealMemberCostDto
     // Informational only — total Bazar this member bought (any FundingSource), not used in
     // GiveTake. Personal-funded spend already flows into Contribution via its auto-mirrored row.
     public decimal BazarSpend { get; init; }
+    // Net of the member's Withdrawals in the period (contributions minus withdrawals).
     public decimal Contribution { get; init; }
     public decimal GiveTake { get; init; }
 }

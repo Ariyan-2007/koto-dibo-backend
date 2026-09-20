@@ -13,17 +13,20 @@ public class MealCalculationService : IMealCalculationService
 
     private readonly IRepository<BazarPurchase> _purchases;
     private readonly IRepository<Contribution> _contributions;
+    private readonly IRepository<Withdrawal> _withdrawals;
     private readonly IRepository<DailyMealEntry> _mealEntries;
     private readonly IHouseholdAccessService _access;
 
     public MealCalculationService(
         IRepository<BazarPurchase> purchases,
         IRepository<Contribution> contributions,
+        IRepository<Withdrawal> withdrawals,
         IRepository<DailyMealEntry> mealEntries,
         IHouseholdAccessService access)
     {
         _purchases = purchases;
         _contributions = contributions;
+        _withdrawals = withdrawals;
         _mealEntries = mealEntries;
         _access = access;
     }
@@ -57,6 +60,13 @@ public class MealCalculationService : IMealCalculationService
             .GroupBy(c => c.ContributedByUserId)
             .ToDictionary(g => g.Key, g => g.Sum(c => c.Amount));
 
+        var withdrawals = await _withdrawals.FindAsync(
+            w => w.HouseholdId == householdId && w.Date >= from && w.Date <= to,
+            cancellationToken);
+        var withdrawalsByUser = withdrawals
+            .GroupBy(w => w.WithdrawnByUserId)
+            .ToDictionary(g => g.Key, g => g.Sum(w => w.Amount));
+
         var mealEntries = await _mealEntries.FindAsync(
             e => e.HouseholdId == householdId && e.Status == DailyMealEntryStatus.Active && e.Date >= from && e.Date <= to,
             cancellationToken);
@@ -72,6 +82,7 @@ public class MealCalculationService : IMealCalculationService
         var userIds = weightsByUser.Keys
             .Union(purchasesByUser.Keys)
             .Union(contributionsByUser.Keys)
+            .Union(withdrawalsByUser.Keys)
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToList();
 
@@ -85,7 +96,10 @@ public class MealCalculationService : IMealCalculationService
             // contributionsByUser already reflects it — adding purchasesByUser here too would
             // double-count that spend. A purchase paid from the household fund intentionally
             // contributes nothing here: the buyer didn't personally give that money, the fund did.
-            var contribution = contributionsByUser.GetValueOrDefault(userId, 0m);
+            //
+            // A Withdrawal is cash the member took back out of the pool, so it is deducted from
+            // their net contribution — money they gave and then reclaimed shouldn't still count.
+            var contribution = contributionsByUser.GetValueOrDefault(userId, 0m) - withdrawalsByUser.GetValueOrDefault(userId, 0m);
             return new MealMemberCostDto
             {
                 UserId = userId,

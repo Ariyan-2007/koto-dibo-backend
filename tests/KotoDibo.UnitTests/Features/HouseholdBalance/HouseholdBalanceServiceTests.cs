@@ -17,6 +17,7 @@ public class HouseholdBalanceServiceTests
 
     private readonly Mock<IRepository<Contribution>> _contributions = new();
     private readonly Mock<IRepository<BazarPurchase>> _purchases = new();
+    private readonly Mock<IRepository<Withdrawal>> _withdrawals = new();
     private readonly Mock<IRepository<HouseholdMembership>> _memberships = new();
     private readonly Mock<IDateTimeProvider> _dateTimeProvider = new();
 
@@ -26,8 +27,10 @@ public class HouseholdBalanceServiceTests
     {
         _dateTimeProvider.Setup(x => x.UtcNow).Returns(Now);
         var access = new HouseholdAccessService(_memberships.Object);
-        _sut = new HouseholdBalanceService(_contributions.Object, _purchases.Object, access, _dateTimeProvider.Object);
+        _sut = new HouseholdBalanceService(_contributions.Object, _purchases.Object, _withdrawals.Object, access, _dateTimeProvider.Object);
 
+        _withdrawals.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Withdrawal, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
         _memberships.Setup(x => x.FindOneAsync(It.IsAny<Expression<Func<HouseholdMembership, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HouseholdMembership
             {
@@ -80,6 +83,22 @@ public class HouseholdBalanceServiceTests
         result.TotalContributions.Should().Be(5000m);
         result.TotalSpentFromFund.Should().Be(2000m);
         result.CurrentBalance.Should().Be(3000m);
+    }
+
+    [Fact]
+    public async Task GetBalanceAsync_WithWithdrawal_SubtractsItFromBalance()
+    {
+        _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([ContributionEntry(5000m)]);
+        _purchases.Setup(x => x.FindAsync(It.IsAny<Expression<Func<BazarPurchase, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([FundPurchase(1000m)]);
+        _withdrawals.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Withdrawal, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Withdrawal { Id = "w-1", HouseholdId = "household-1", WithdrawnByUserId = "someone", Date = Today, Amount = 800m, Currency = "BDT" }]);
+
+        var result = await _sut.GetBalanceAsync("household-1", "caller-1", CancellationToken.None);
+
+        result.TotalWithdrawn.Should().Be(800m);
+        result.CurrentBalance.Should().Be(3200m);
     }
 
     [Fact]

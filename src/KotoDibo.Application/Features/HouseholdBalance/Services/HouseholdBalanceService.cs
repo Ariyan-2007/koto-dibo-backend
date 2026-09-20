@@ -11,17 +11,20 @@ public class HouseholdBalanceService : IHouseholdBalanceService
 {
     private readonly IRepository<Contribution> _contributions;
     private readonly IRepository<BazarPurchase> _purchases;
+    private readonly IRepository<Withdrawal> _withdrawals;
     private readonly IHouseholdAccessService _access;
     private readonly IDateTimeProvider _dateTimeProvider;
 
     public HouseholdBalanceService(
         IRepository<Contribution> contributions,
         IRepository<BazarPurchase> purchases,
+        IRepository<Withdrawal> withdrawals,
         IHouseholdAccessService access,
         IDateTimeProvider dateTimeProvider)
     {
         _contributions = contributions;
         _purchases = purchases;
+        _withdrawals = withdrawals;
         _access = access;
         _dateTimeProvider = dateTimeProvider;
     }
@@ -37,6 +40,8 @@ public class HouseholdBalanceService : IHouseholdBalanceService
             p => p.HouseholdId == householdId && p.Status == FinancialEntryStatus.Active,
             cancellationToken);
 
+        var withdrawals = await _withdrawals.FindAsync(w => w.HouseholdId == householdId, cancellationToken);
+
         var totalContributions = contributions.Sum(c => c.Amount);
         // Every active Bazar expense that actually reduces the balance: drawn directly from the
         // fund, or a personal-pocket purchase offsetting its own mirrored Contribution (see
@@ -47,6 +52,7 @@ public class HouseholdBalanceService : IHouseholdBalanceService
             .Sum(p => p.Amount);
         var currency = contributions.Select(c => c.Currency).FirstOrDefault()
             ?? purchases.Select(p => p.Currency).FirstOrDefault()
+            ?? withdrawals.Select(w => w.Currency).FirstOrDefault()
             ?? string.Empty;
 
         return new HouseholdBalanceDto
@@ -54,7 +60,8 @@ public class HouseholdBalanceService : IHouseholdBalanceService
             HouseholdId = householdId,
             TotalContributions = totalContributions,
             TotalSpentFromFund = totalSpentFromFund,
-            CurrentBalance = HouseholdBalanceCalculator.Calculate(contributions, purchases),
+            TotalWithdrawn = withdrawals.Sum(w => w.Amount),
+            CurrentBalance = HouseholdBalanceCalculator.Calculate(contributions, purchases, withdrawals),
             Currency = currency,
             AsOf = _dateTimeProvider.UtcNow,
         };
@@ -75,6 +82,10 @@ public class HouseholdBalanceService : IHouseholdBalanceService
             p => p.HouseholdId == householdId && p.Date >= effectiveFrom && p.Date <= effectiveTo,
             cancellationToken);
 
+        var withdrawals = await _withdrawals.FindAsync(
+            w => w.HouseholdId == householdId && w.Date >= effectiveFrom && w.Date <= effectiveTo,
+            cancellationToken);
+
         IEnumerable<Contribution> filteredContributions = contributions;
         IEnumerable<BazarPurchase> filteredPurchases = purchases;
         if (parsedStatus is { } s)
@@ -82,6 +93,10 @@ public class HouseholdBalanceService : IHouseholdBalanceService
             filteredContributions = filteredContributions.Where(c => c.Status == s);
             filteredPurchases = filteredPurchases.Where(p => p.Status == s);
         }
+
+        // Withdrawals are hard-deleted and have no Status — every stored row is live, so they only
+        // drop out when the caller asks specifically for Cancelled rows.
+        var includeWithdrawals = parsedStatus is null or FinancialEntryStatus.Active;
 
         var contributionEntries = filteredContributions.Select(c => new HouseholdLedgerTransactionDto
         {
@@ -127,7 +142,29 @@ public class HouseholdBalanceService : IHouseholdBalanceService
             UpdatedAt = p.UpdatedAt,
         });
 
-        return contributionEntries.Concat(purchaseEntries)
+        var withdrawalEntries = includeWithdrawals
+            ? withdrawals.Select(w => new HouseholdLedgerTransactionDto
+            {
+                Id = w.Id,
+                HouseholdId = w.HouseholdId,
+                EntryType = "Withdrawal",
+                Direction = "Out",
+                BalanceImpact = -w.Amount,
+                Date = w.Date,
+                Amount = w.Amount,
+                Currency = w.Currency,
+                UserId = w.WithdrawnByUserId,
+                CreatedByUserId = w.CreatedByUserId,
+                SourceType = "Manual",
+                LinkedEntryId = null,
+                Note = w.Notes,
+                Status = FinancialEntryStatus.Active.ToString(),
+                CreatedAt = w.CreatedAt,
+                UpdatedAt = w.UpdatedAt,
+            })
+            : [];
+
+        return contributionEntries.Concat(purchaseEntries).Concat(withdrawalEntries)
             .OrderByDescending(t => t.Date)
             .ThenByDescending(t => t.CreatedAt)
             .ToList();
@@ -142,7 +179,9 @@ public class HouseholdBalanceService : IHouseholdBalanceService
             p => p.HouseholdId == householdId && p.Status == FinancialEntryStatus.Active,
             cancellationToken);
 
-        return HouseholdBalanceCalculator.Calculate(contributions, purchases);
+        var withdrawals = await _withdrawals.FindAsync(w => w.HouseholdId == householdId, cancellationToken);
+
+        return HouseholdBalanceCalculator.Calculate(contributions, purchases, withdrawals);
     }
 
     public async Task<string?> GetEstablishedCurrencyAsync(string householdId, CancellationToken cancellationToken = default)
@@ -158,6 +197,12 @@ public class HouseholdBalanceService : IHouseholdBalanceService
         var purchase = await _purchases.FindOneAsync(
             p => p.HouseholdId == householdId && p.Status == FinancialEntryStatus.Active,
             cancellationToken);
-        return purchase?.Currency;
+        if (purchase is not null)
+        {
+            return purchase.Currency;
+        }
+
+        var withdrawal = await _withdrawals.FindOneAsync(w => w.HouseholdId == householdId, cancellationToken);
+        return withdrawal?.Currency;
     }
 }

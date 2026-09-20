@@ -25,6 +25,11 @@ public enum HouseholdPermission
     UpdateContribution,
     DeleteContribution,
 
+    AddWithdrawal,
+    AddAnyWithdrawal,
+    ViewWithdrawals,
+    DeleteWithdrawal,
+
     ViewHouseholdBalance,
 
     RecordOwnMealCount,

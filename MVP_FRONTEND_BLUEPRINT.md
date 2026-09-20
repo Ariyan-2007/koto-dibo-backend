@@ -10,6 +10,8 @@
 >
 > **Update (2026-09-03):** Phase 7 was rebuilt from a two-endpoint CRUD stub into a full personal Budget & Expenses module — categories, tags, payment methods, recurring expenses, category-level budget envelopes with rollover/adjustment history, and a single dashboard endpoint that returns a complete budget-vs-actual picture in one call. **This is a breaking change** to the old `Expense`/`Budget` DTO shapes documented in the previous version of this section (`Category` is now `CategoryId`/`CategoryName`, `Period` is now `StartDate`/`EndDate`/`PeriodType`, routes moved from `/api/budget` to `/api/budgets`) — do not build against the old shapes. These remain **personal, per-user** endpoints (no household scoping, no `HouseholdId`), unlike every other module in this document.
 >
+> **Update (2026-09-20): Withdrawals — new money-out ledger entry.** A member can now take cash back out of the household's shared fund, only while the fund can cover it, and the amount is deducted from **that member's** contribution in the meal calculation. Purely additive — no existing endpoint or field changed shape except three additions: `HouseholdBalanceDto.TotalWithdrawn`, a new `"Withdrawal"` `EntryType` in the ledger feed, and Withdrawals now reduce `MealMemberCostDto.Contribution`. Full spec in Phase 2 §2.5.
+
 > **Update (2026-09-04):** Phase 2 was rebuilt into a full Bazar ↔ Contribution ↔ Household Ledger accounting system, and a Household Balance/Ledger API is now documented for the first time (it existed as a bare `GET .../balance` before this, undocumented — it's expanded below, not a breaking change). Highlights, all detailed in the rewritten Phase 2:
 > - **`FundingSource` on every Bazar purchase** (`Personal` — paid out of pocket, the default — or `HouseholdFund` — drawn from the shared pool) now drives real accounting: a `Personal` purchase auto-creates a linked `Contribution` for the same amount (so the buyer gets credited) and the two net to **zero** balance impact together; a `HouseholdFund` purchase draws the pool down directly and is rejected with a domain error if funds are insufficient.
 > - **Contributions gained an on-behalf-of flow**, mirroring Bazar's existing one: `POST .../contributions/{userId}`, Owner/Manager only.
@@ -61,7 +63,7 @@ Mirror `HouseholdRolePolicy` so the UI never offers an action the API will rejec
 |---|---|---|---|---|
 | View lists / settlements | ✅ | ✅ | ✅ | ✅ |
 | Add own entry | ✅ | ✅ | ✅ | ❌ |
-| Add entry **on behalf of another member** (Bazar, Contributions) | ✅ | ✅ | ❌ | ❌ |
+| Add entry **on behalf of another member** (Bazar, Contributions, Withdrawals) | ✅ | ✅ | ❌ | ❌ |
 | Edit/remove **own** entry | ✅ | ✅ | ✅ | ❌ |
 | Edit/remove **anyone's** entry | ✅ | ✅ | ❌ | ❌ |
 | Record meal count for **another** member | ✅ | ✅ | ❌ | ❌ |
@@ -180,7 +182,7 @@ Three tightly-linked pieces, not two independent CRUD ledgers: **Bazar** (money 
 
 > A Bazar purchase paid **"from my pocket"** (`FundingSource: "Personal"`) is *not* just an expense — it's simultaneously a `Contribution`, auto-created and linked to it, crediting the buyer for fronting the money. That pair always nets to **zero** balance impact. A Bazar purchase paid **"from household"** (`FundingSource: "HouseholdFund"`) is a pure draw on the pool — no Contribution is created, and it's rejected if the pool can't cover it.
 
-**Screens:** Bazar list (filter by date range / status) + Add/Edit/**Delete** (permanent — see the 2026-09-04 changelog note above), with a **payment-source selector** ("Pay from my pocket" vs "Pay from household") and an on-behalf-of member picker for Owner/Manager; Contributions list + Add/Edit/**Delete** (same permanence), with its own on-behalf-of picker ("For User") for Owner/Manager; a Household Balance/Ledger screen (see §2.3) showing the current pool total and a unified transaction history.
+**Screens:** Bazar list (filter by date range / status) + Add/Edit/**Delete** (permanent — see the 2026-09-04 changelog note above), with a **payment-source selector** ("Pay from my pocket" vs "Pay from household") and an on-behalf-of member picker for Owner/Manager; Contributions list + Add/Edit/**Delete** (same permanence), with its own on-behalf-of picker ("For User") for Owner/Manager; a Withdrawals list + Withdraw form + Delete (§2.5); a Household Balance/Ledger screen (see §2.3) showing the current pool total and a unified transaction history.
 
 ### 2.1 Bazar
 
@@ -236,10 +238,10 @@ The backend enforces this regardless of what the frontend does, but **don't rely
 | GET | `/api/households/{householdId}/balance` | any active member | `HouseholdBalanceDto` |
 | GET | `/api/households/{householdId}/balance/transactions?from=&to=&status=` | any active member | `HouseholdLedgerTransactionDto[]` |
 
-`HouseholdBalanceDto`: `{ HouseholdId, TotalContributions, TotalSpentFromFund, CurrentBalance, Currency, AsOf }`. Not period-bound (no `from`/`to`) — it's computed over every `Active` record ever recorded, i.e. "how much cash does the pool have right now." `TotalSpentFromFund` is every active Bazar expense that actually reduces the balance: a `HouseholdFund` purchase, **or** a `Personal` purchase that has a `LinkedContributionId` (offsetting its own mirror — see the worked example below). `CurrentBalance = TotalContributions - TotalSpentFromFund`.
+`HouseholdBalanceDto`: `{ HouseholdId, TotalContributions, TotalSpentFromFund, TotalWithdrawn, CurrentBalance, Currency, AsOf }`. Not period-bound (no `from`/`to`) — it's computed over every `Active` record ever recorded, i.e. "how much cash does the pool have right now." `TotalSpentFromFund` is every active Bazar expense that actually reduces the balance: a `HouseholdFund` purchase, **or** a `Personal` purchase that has a `LinkedContributionId` (offsetting its own mirror — see the worked example below). `CurrentBalance = TotalContributions - TotalSpentFromFund - TotalWithdrawn` (`TotalWithdrawn` is new — sum of every Withdrawal, §2.5).
 
 `HouseholdLedgerTransactionDto` (**new** — the unified transaction feed behind the balance above): `{ Id, HouseholdId, EntryType, Direction, BalanceImpact, Date, Amount, Currency, UserId, CreatedByUserId, SourceType, LinkedEntryId?, Note?, Status, CreatedAt, UpdatedAt }`.
-- `EntryType`: `"Contribution"` or `"BazarPurchase"` — which underlying record this row came from. `Direction`: `"In"` or `"Out"`, for a quick icon/color without inspecting `EntryType`.
+- `EntryType`: `"Contribution"`, `"BazarPurchase"` or `"Withdrawal"` (new — `Direction: "Out"`, `BalanceImpact: -Amount`, `SourceType: "Manual"`, `LinkedEntryId: null`; not returned when `status=Cancelled`) — which underlying record this row came from. `Direction`: `"In"` or `"Out"`, for a quick icon/color without inspecting `EntryType`.
 - **`BalanceImpact` is the field to sum, not `Amount`.** It's each row's actual signed effect on `CurrentBalance`: `+Amount` for every active Contribution; `-Amount` for an active Bazar purchase only when it's `HouseholdFund`-funded *or* has a `LinkedEntryId` (a `Personal` purchase with no mirror — i.e. a negative leftover entry, §2.4 — carries `0`, since it never had an offsetting Contribution in the first place). Summing every row's `BalanceImpact` always equals `HouseholdBalanceDto.CurrentBalance` for the same `status` filter — use this as a client-side consistency check if useful, it should never mismatch.
 - `UserId` is the financial owner (`PurchasedByUserId`/`ContributedByUserId`); `CreatedByUserId` the actual submitter — same distinction as §2.1/§2.2.
 - `SourceType` is `FundingSource` for a `BazarPurchase` row or `SourceType` for a `Contribution` row (the same string values as their own DTOs above). `LinkedEntryId` is the counterpart record's id — a `Personal` purchase's mirrored Contribution, or an `AutoFromBazar` Contribution's originating purchase — `null` otherwise; use it to let a user click from one half of a linked pair to the other.
@@ -263,6 +265,36 @@ Notes (all three sub-sections above):
 - Contributions do **not** have this mechanic — `Amount` stays `> 0` there. Carry-forward is a Bazar/food-cost concept only; per-member settlement carry-forward (§0.6) is computed, never recorded as a ledger row.
 
 ---
+
+
+### 2.5 Withdrawals (money out of the pool, charged to a member)
+
+A **Withdrawal** is a member taking cash back out of the shared fund. It is the mirror image of a Contribution: it lowers `CurrentBalance` directly, and it is deducted from **the withdrawing member's** `Contribution` figure in the meal calculation (§Phase 3 — `MealMemberCostDto.Contribution` is now *contributions minus withdrawals* within the requested date range, so their `GiveTake` drops by the same amount). It can only be recorded while the household balance can cover it.
+
+| Method | Path | Who | Body | Response |
+|---|---|---|---|---|
+| POST | `/api/households/{householdId}/withdrawals` | Owner / Manager / Member (not Viewer) | `CreateWithdrawalRequest` | `WithdrawalDto` (201) |
+| POST | `/api/households/{householdId}/withdrawals/{userId}` | Owner/Manager (self also allowed) | `CreateWithdrawalRequest` | `WithdrawalDto` (201) |
+| GET | `/api/households/{householdId}/withdrawals?from=&to=` | any active member | — | `WithdrawalDto[]` |
+| GET | `/api/households/{householdId}/withdrawals/{withdrawalId}` | any active member | — | `WithdrawalDto` |
+| DELETE | `/api/households/{householdId}/withdrawals/{withdrawalId}` | owner of the entry, or Owner/Manager | — | `204 No Content` |
+
+`CreateWithdrawalRequest`: `{ Date, Amount, Currency, Notes? }` — `Amount > 0`, `Date` not in the future, `Currency` a 3-letter code that must match the household's established currency (same rule as Contributions). There is **no PATCH** — to correct a mistake, delete and re-add.
+
+`WithdrawalDto`: `{ Id, HouseholdId, WithdrawnByUserId, CreatedByUserId, Date, Amount, Currency, Notes?, CreatedAt, UpdatedAt }`. `WithdrawnByUserId` is who the money (and the contribution deduction) belongs to; `CreatedByUserId` is who submitted it — differs only for an Owner/Manager on-behalf-of entry. No `Status` field: Withdrawals are hard-deleted like Bazar/Contributions.
+
+**Errors to handle in the Withdraw form:**
+- **`409` insufficient funds** — `Amount` exceeds the household's current balance (also returned when the household has no transactions at all yet). The `detail` message includes the current balance; show it inline on the amount field. Pre-check against `GET .../balance` → `CurrentBalance` and disable/cap the submit so users rarely hit this, but still handle the 409 — another member can spend or withdraw between your read and your submit.
+- `400` — future date, non-positive amount, or a `Currency` that doesn't match the household's (message names the expected one; default the field from `HouseholdBalanceDto.Currency`).
+- `403` — Viewer, or a Member using the on-behalf-of route for someone else, or a Member deleting another member's withdrawal.
+
+**UI guidance:**
+- Put a **"Withdraw"** action next to "Add contribution" on the Household Balance screen, showing the available balance (`CurrentBalance`) beside the amount field. Hide it for Viewers; show the on-behalf-of member picker only for Owner/Manager (§0.4).
+- Ledger feed: render `EntryType: "Withdrawal"` rows as money-out (same treatment as a fund-paid Bazar row, with a distinct "Withdrawal" label). Continue to sum `BalanceImpact`, not `Amount` — the invariant `CurrentBalance == Σ BalanceImpact` still holds.
+- Deleting a withdrawal is a permanent hard delete that **returns the amount to the balance** (and restores the member's contribution in meal calculations). Use irreversible-action confirm copy.
+- Meal calculation / settlement screens: no new fields — but the per-member `Contribution` may now be lower than the sum of that member's Contribution rows. If you show a breakdown, explain the gap as "withdrawals" and link to `GET .../withdrawals?from=&to=` for the same range.
+
+**Worked example:** the pool holds ৳3,000 (Ariyan gave ৳2,000, Waythin ৳1,000; nothing spent). Ariyan withdraws ৳500 → balance ৳2,500, Ariyan's `Contribution` in that month's meal calculation becomes ৳1,500 (Waythin's stays ৳1,000). Ariyan then tries to withdraw ৳2,600 → `409`, nothing recorded.
 
 ## Phase 3 — Meal Module
 
