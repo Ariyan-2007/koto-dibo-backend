@@ -5,7 +5,8 @@ namespace KotoDibo.Application.Features.Withdrawals.Interfaces;
 public interface IWithdrawalService
 {
     // Rejected with InsufficientFundsException (409) when request.Amount exceeds the household's
-    // current balance.
+    // current balance, or the target member's own net contributions (contributed minus withdrawn).
+    // Runs under the household ledger lock so concurrent spends can't overdraw the fund.
     Task<WithdrawalDto> CreateAsync(string householdId, string callerUserId, string targetUserId, CreateWithdrawalRequest request, CancellationToken cancellationToken = default);
 
     Task<WithdrawalDto> GetByIdAsync(string householdId, string callerUserId, string withdrawalId, CancellationToken cancellationToken = default);

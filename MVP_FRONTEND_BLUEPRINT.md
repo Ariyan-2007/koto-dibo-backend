@@ -269,7 +269,7 @@ Notes (all three sub-sections above):
 
 ### 2.5 Withdrawals (money out of the pool, charged to a member)
 
-A **Withdrawal** is a member taking cash back out of the shared fund. It is the mirror image of a Contribution: it lowers `CurrentBalance` directly, and it is deducted from **the withdrawing member's** `Contribution` figure in the meal calculation (§Phase 3 — `MealMemberCostDto.Contribution` is now *contributions minus withdrawals* within the requested date range, so their `GiveTake` drops by the same amount). It can only be recorded while the household balance can cover it.
+A **Withdrawal** is a member taking cash back out of the shared fund. It is the mirror image of a Contribution: it lowers `CurrentBalance` directly, and it is deducted from **the withdrawing member's** `Contribution` figure in the meal calculation (§Phase 3 — `MealMemberCostDto.Contribution` is now *contributions minus withdrawals* within the requested date range, so their `GiveTake` drops by the same amount). It can only be recorded while the household balance can cover it **and** the member has contributed at least that much net of their earlier withdrawals.
 
 | Method | Path | Who | Body | Response |
 |---|---|---|---|---|
@@ -285,6 +285,8 @@ A **Withdrawal** is a member taking cash back out of the shared fund. It is the 
 
 **Errors to handle in the Withdraw form:**
 - **`409` insufficient funds** — `Amount` exceeds the household's current balance (also returned when the household has no transactions at all yet). The `detail` message includes the current balance; show it inline on the amount field. Pre-check against `GET .../balance` → `CurrentBalance` and disable/cap the submit so users rarely hit this, but still handle the 409 — another member can spend or withdraw between your read and your submit.
+- **`409` exceeds the member's own contributions** — a member can only withdraw what they've put in: their active Contributions to date minus their earlier Withdrawals (this applies to the on-behalf-of route too, against `{userId}`). The message states the member's contributed/withdrawn totals and the maximum allowed. Pre-compute the cap client-side as `min(CurrentBalance, member's Σ Contribution.Amount − member's Σ Withdrawal.Amount)` from the two list endpoints and cap the amount field with it. Both `409` cases share the same status — distinguish them only by showing the server's `detail` text.
+- Concurrent withdrawals are serialized server-side per household, so two people submitting at the same moment can't overdraw the pool — the second simply gets the `409` above. No client-side locking needed.
 - `400` — future date, non-positive amount, or a `Currency` that doesn't match the household's (message names the expected one; default the field from `HouseholdBalanceDto.Currency`).
 - `403` — Viewer, or a Member using the on-behalf-of route for someone else, or a Member deleting another member's withdrawal.
 
@@ -294,7 +296,7 @@ A **Withdrawal** is a member taking cash back out of the shared fund. It is the 
 - Deleting a withdrawal is a permanent hard delete that **returns the amount to the balance** (and restores the member's contribution in meal calculations). Use irreversible-action confirm copy.
 - Meal calculation / settlement screens: no new fields — but the per-member `Contribution` may now be lower than the sum of that member's Contribution rows. If you show a breakdown, explain the gap as "withdrawals" and link to `GET .../withdrawals?from=&to=` for the same range.
 
-**Worked example:** the pool holds ৳3,000 (Ariyan gave ৳2,000, Waythin ৳1,000; nothing spent). Ariyan withdraws ৳500 → balance ৳2,500, Ariyan's `Contribution` in that month's meal calculation becomes ৳1,500 (Waythin's stays ৳1,000). Ariyan then tries to withdraw ৳2,600 → `409`, nothing recorded.
+**Worked example:** the pool holds ৳3,000 (Ariyan gave ৳2,000, Waythin ৳1,000; nothing spent). Ariyan withdraws ৳500 → balance ৳2,500, Ariyan's `Contribution` in that month's meal calculation becomes ৳1,500 (Waythin's stays ৳1,000). Ariyan then tries to withdraw ৳2,600 → `409`, nothing recorded. Waythin tries to withdraw ৳1,500 → also `409` (the pool has ৳2,500, but Waythin has only ever contributed ৳1,000).
 
 ## Phase 3 — Meal Module
 

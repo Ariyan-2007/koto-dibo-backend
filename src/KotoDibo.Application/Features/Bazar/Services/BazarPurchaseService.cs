@@ -19,6 +19,7 @@ public class BazarPurchaseService : IBazarPurchaseService
     private readonly IHouseholdAccessService _access;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHouseholdLedgerLock _ledgerLock;
     private readonly IValidator<CreateBazarPurchaseRequest> _createValidator;
     private readonly IValidator<UpdateBazarPurchaseRequest> _updateValidator;
 
@@ -29,6 +30,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         IHouseholdAccessService access,
         IDateTimeProvider dateTimeProvider,
         IUnitOfWork unitOfWork,
+        IHouseholdLedgerLock ledgerLock,
         IValidator<CreateBazarPurchaseRequest> createValidator,
         IValidator<UpdateBazarPurchaseRequest> updateValidator)
     {
@@ -38,6 +40,7 @@ public class BazarPurchaseService : IBazarPurchaseService
         _access = access;
         _dateTimeProvider = dateTimeProvider;
         _unitOfWork = unitOfWork;
+        _ledgerLock = ledgerLock;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
     }
@@ -56,11 +59,6 @@ public class BazarPurchaseService : IBazarPurchaseService
         var fundingSource = ParseFundingSource(request.FundingSource);
         var currency = request.Currency.Trim().ToUpperInvariant();
         await RequireConsistentCurrencyAsync(householdId, currency, nameof(request.Currency), cancellationToken);
-
-        if (fundingSource == BazarFundingSource.HouseholdFund)
-        {
-            await RequireSufficientBalanceAsync(householdId, request.Amount, currency, cancellationToken);
-        }
 
         var now = _dateTimeProvider.UtcNow;
         var purchase = new BazarPurchase
@@ -83,6 +81,15 @@ public class BazarPurchaseService : IBazarPurchaseService
         // for the money the buyer put in, or a floating LinkedContributionId pointing nowhere.
         return await _unitOfWork.ExecuteAsync(async ct =>
         {
+            // The overdraft check must run inside the transaction, after taking the household's
+            // ledger lock, so a concurrent Withdrawal/fund purchase can't spend the same money
+            // between this check and the insert (the lock makes it conflict and retry).
+            if (fundingSource == BazarFundingSource.HouseholdFund)
+            {
+                await _ledgerLock.AcquireAsync(householdId, ct);
+                await RequireSufficientBalanceAsync(householdId, request.Amount, currency, ct);
+            }
+
             await _purchases.AddAsync(purchase, ct);
 
             // A purchase paid personally is, from the household's point of view, money the buyer just

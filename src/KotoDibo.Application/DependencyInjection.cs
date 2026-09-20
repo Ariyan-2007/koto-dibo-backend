@@ -11,6 +11,7 @@ using KotoDibo.Application.Features.Budget.Interfaces;
 using KotoDibo.Application.Features.Budget.Services;
 using KotoDibo.Application.Features.BudgetDashboard.Interfaces;
 using KotoDibo.Application.Features.BudgetDashboard.Services;
+using KotoDibo.Application.Common;
 using KotoDibo.Application.Features.Contributions.Interfaces;
 using KotoDibo.Application.Features.Contributions.Services;
 using KotoDibo.Application.Features.Withdrawals.Interfaces;
@@ -62,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<IBazarPurchaseService, BazarPurchaseService>();
         services.AddScoped<IContributionService, ContributionService>();
         services.AddScoped<IWithdrawalService, WithdrawalService>();
+        services.AddScoped<IHouseholdLedgerLock, HouseholdLedgerLockService>();
         services.AddScoped<IHouseholdBalanceService, HouseholdBalanceService>();
         services.AddScoped<IBillSplitService, BillSplitService>();
         services.AddScoped<ISettlementService, SettlementService>();

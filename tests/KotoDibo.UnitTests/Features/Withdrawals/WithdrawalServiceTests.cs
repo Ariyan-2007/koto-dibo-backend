@@ -10,6 +10,7 @@ using KotoDibo.Application.Features.Withdrawals.Validators;
 using KotoDibo.Domain.Entities;
 using KotoDibo.Domain.Enums;
 using KotoDibo.Domain.Exceptions;
+using KotoDibo.UnitTests.TestHelpers;
 using Moq;
 
 namespace KotoDibo.UnitTests.Features.Withdrawals;
@@ -20,6 +21,8 @@ public class WithdrawalServiceTests
     private static readonly DateOnly Today = DateOnly.FromDateTime(Now);
 
     private readonly Mock<IRepository<Withdrawal>> _withdrawals = new();
+    private readonly Mock<IRepository<Contribution>> _contributions = new();
+    private readonly Mock<IHouseholdLedgerLock> _ledgerLock = new();
     private readonly Mock<IRepository<HouseholdMembership>> _memberships = new();
     private readonly Mock<IHouseholdBalanceService> _balance = new();
     private readonly Mock<IDateTimeProvider> _dateTimeProvider = new();
@@ -35,8 +38,16 @@ public class WithdrawalServiceTests
         _balance.Setup(x => x.GetEstablishedCurrencyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("BDT");
         _balance.Setup(x => x.GetCurrentBalanceAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(1000m);
 
+        _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Contribution { Id = "c-1", HouseholdId = "household-1", Amount = 1000m, Currency = "BDT", Status = FinancialEntryStatus.Active }]);
+        _withdrawals.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Withdrawal, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
         _sut = new WithdrawalService(
             _withdrawals.Object,
+            _contributions.Object,
+            new PassthroughUnitOfWork(),
+            _ledgerLock.Object,
             new HouseholdAccessService(_memberships.Object),
             _balance.Object,
             _dateTimeProvider.Object,
@@ -71,6 +82,34 @@ public class WithdrawalServiceTests
         result.Amount.Should().Be(1000m);
         result.WithdrawnByUserId.Should().Be("caller-1");
         _withdrawals.Verify(x => x.AddAsync(It.IsAny<Withdrawal>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AcquiresLedgerLockBeforeSaving()
+    {
+        GivenMembership(HouseholdRole.Member);
+
+        await _sut.CreateAsync("household-1", "caller-1", "caller-1", Request(), CancellationToken.None);
+
+        _ledgerLock.Verify(x => x.AcquireAsync("household-1", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ExceedingOwnContributions_ThrowsInsufficientFunds()
+    {
+        GivenMembership(HouseholdRole.Member);
+        // Pool is plentiful, but this member only ever put in 300 and already took back 100.
+        _balance.Setup(x => x.GetCurrentBalanceAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(5000m);
+        _contributions.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Contribution, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Contribution { Id = "c-1", HouseholdId = "household-1", Amount = 300m, Currency = "BDT", Status = FinancialEntryStatus.Active }]);
+        _withdrawals.Setup(x => x.FindAsync(It.IsAny<Expression<Func<Withdrawal, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Withdrawal { Id = "w-0", HouseholdId = "household-1", Amount = 100m, Currency = "BDT" }]);
+
+        var over = () => _sut.CreateAsync("household-1", "caller-1", "caller-1", Request(250m), CancellationToken.None);
+        await over.Should().ThrowAsync<InsufficientFundsException>();
+
+        var exact = await _sut.CreateAsync("household-1", "caller-1", "caller-1", Request(200m), CancellationToken.None);
+        exact.Amount.Should().Be(200m);
     }
 
     [Fact]

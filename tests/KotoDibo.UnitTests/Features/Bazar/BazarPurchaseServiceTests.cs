@@ -47,6 +47,7 @@ public class BazarPurchaseServiceTests
             access,
             _dateTimeProvider.Object,
             new TestHelpers.PassthroughUnitOfWork(),
+            Mock.Of<IHouseholdLedgerLock>(),
             new CreateBazarPurchaseRequestValidator(),
             new UpdateBazarPurchaseRequestValidator());
     }

@@ -15,6 +15,7 @@ public static class MongoClassMapRegistrar
             new BazarPurchaseConfiguration(),
             new ContributionConfiguration(),
             new WithdrawalConfiguration(),
+            new HouseholdLedgerLockConfiguration(),
             new DailyMealEntryConfiguration(),
             new BillSplitConfiguration(),
             new UtilityTariffConfigConfiguration(),
